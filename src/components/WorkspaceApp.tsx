@@ -9,6 +9,7 @@ import {
   Eye,
   FileText,
   FolderOpen,
+  History,
   Link2,
   LockKeyhole,
   Menu,
@@ -25,17 +26,20 @@ import {
 import { Brand } from './Brand'
 import { FolderTree } from './FolderTree'
 import { FolderDialog } from './FolderDialog'
+import { HistoryDialog } from './HistoryDialog'
 import { GraphView } from './GraphView'
 import { SyncDialog } from './SyncDialog'
 import { incomingNotes, markdownWithWikiLinks, noteByTitle, outgoingNotes, renameWikiLinks } from '../lib/links'
 import { useTheme } from '../lib/theme'
 import { saveVault } from '../lib/vault'
 import { sortedNotes, uniqueTitle } from '../lib/workspace'
+import { restoredFromRevision, withRevision } from '../lib/history'
 import {
   createFolder,
   createNote,
   type Folder,
   type Note,
+  type NoteRevision,
   type Workspace,
 } from '../lib/types'
 
@@ -66,6 +70,7 @@ export function WorkspaceApp({
   const [localGraph, setLocalGraph] = useState(false)
   const [syncOpen, setSyncOpen] = useState(false)
   const [folderDialogParent, setFolderDialogParent] = useState<string | null | undefined>(undefined)
+  const [historyOpen, setHistoryOpen] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [mobileNoteOpen, setMobileNoteOpen] = useState(false)
   const [railCollapsed, setRailCollapsed] = useState(false)
@@ -134,6 +139,7 @@ export function WorkspaceApp({
         setSearchOpen(false)
         setSidebarOpen(false)
         setFolderDialogParent(undefined)
+        setHistoryOpen(false)
       }
     }
     window.addEventListener('keydown', onKeyDown)
@@ -167,7 +173,11 @@ export function WorkspaceApp({
       ...current,
       notes: current.notes.map((note) => {
         if (note.id === activeNote.id) {
-          return { ...note, title, updatedAt: new Date().toISOString() }
+          return {
+            ...withRevision(note),
+            title,
+            updatedAt: new Date().toISOString(),
+          }
         }
         const content = renameWikiLinks(note.content, activeNote.title, title)
         return content === note.content ? note : { ...note, content, updatedAt: new Date().toISOString() }
@@ -215,9 +225,27 @@ export function WorkspaceApp({
   function openNote(id: string) {
     setActiveNoteId(id)
     setMainView('note')
-    setEditorMode('read')
+    setEditorMode('write')
     setSidebarOpen(false)
     setMobileNoteOpen(true)
+    setHistoryOpen(false)
+    window.setTimeout(() => textareaRef.current?.focus(), 0)
+  }
+
+  function updateContent(content: string) {
+    if (!activeNote || content === activeNote.content) return
+    updateNote(activeNote.id, (note) => ({
+      ...withRevision(note),
+      content,
+      updatedAt: new Date().toISOString(),
+    }))
+  }
+
+  function restoreRevision(revision: NoteRevision) {
+    if (!activeNote) return
+    updateNote(activeNote.id, (note) => restoredFromRevision(note, revision))
+    setHistoryOpen(false)
+    setEditorMode('write')
   }
 
   function navigateWikiLink(targetTitle: string) {
@@ -434,6 +462,9 @@ export function WorkspaceApp({
                 }} title="Open local graph">
                   <Network size={17} />
                 </button>
+                <button className="icon-button" onClick={() => setHistoryOpen(true)} title="Version history">
+                  <History size={17} />
+                </button>
                 <button className="icon-button danger-icon" onClick={removeNote} title="Delete note">
                   <Trash2 size={17} />
                 </button>
@@ -479,11 +510,7 @@ export function WorkspaceApp({
                       value={activeNote.content}
                       onChange={(event) => {
                         setCursorPosition(event.target.selectionStart)
-                        updateNote(activeNote.id, (note) => ({
-                          ...note,
-                          content: event.target.value,
-                          updatedAt: new Date().toISOString(),
-                        }))
+                        updateContent(event.target.value)
                       }}
                       onClick={(event) => setCursorPosition(event.currentTarget.selectionStart)}
                       onKeyUp={(event) => setCursorPosition(event.currentTarget.selectionStart)}
@@ -494,7 +521,7 @@ export function WorkspaceApp({
                           const start = target.selectionStart
                           const end = target.selectionEnd
                           const content = `${activeNote.content.slice(0, start)}  ${activeNote.content.slice(end)}`
-                          updateNote(activeNote.id, (note) => ({ ...note, content, updatedAt: new Date().toISOString() }))
+                          updateContent(content)
                           window.setTimeout(() => target.setSelectionRange(start + 2, start + 2), 0)
                         }
                       }}
@@ -612,6 +639,13 @@ export function WorkspaceApp({
             .map((folder) => folder.name)}
           onCreate={createFolderFromDialog}
           onClose={() => setFolderDialogParent(undefined)}
+        />
+      )}
+      {historyOpen && activeNote && (
+        <HistoryDialog
+          note={activeNote}
+          onRestore={restoreRevision}
+          onClose={() => setHistoryOpen(false)}
         />
       )}
     </main>

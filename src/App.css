@@ -247,6 +247,142 @@ button {
   text-align: center;
 }
 
+.history-dialog {
+  display: flex;
+  width: min(850px, 100%);
+  height: min(610px, calc(100svh - 40px));
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--surface);
+  box-shadow: 0 35px 100px rgba(0, 0, 0, 0.35);
+}
+
+.history-dialog > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 22px;
+  border-bottom: 1px solid var(--line);
+}
+
+.history-title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 11px;
+}
+
+.history-title > svg {
+  color: var(--accent);
+}
+
+.history-title h2 {
+  overflow: hidden;
+  margin: 0;
+  font-family: var(--serif);
+  font-size: 22px;
+  font-weight: 500;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.history-body {
+  display: grid;
+  min-height: 0;
+  flex: 1;
+  grid-template-columns: 230px minmax(0, 1fr);
+}
+
+.history-list {
+  overflow-y: auto;
+  padding: 10px;
+  border-right: 1px solid var(--line);
+  background: var(--surface-2);
+}
+
+.history-list button {
+  display: grid;
+  width: 100%;
+  gap: 3px;
+  padding: 10px;
+  border-radius: 9px;
+  color: var(--ink);
+  background: transparent;
+  text-align: left;
+}
+
+.history-list button:hover,
+.history-list button.active {
+  background: var(--surface-3);
+}
+
+.history-list strong {
+  font-size: 11px;
+}
+
+.history-list span {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.history-preview {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.history-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--line);
+}
+
+.history-preview-header h3 {
+  overflow: hidden;
+  margin: 0;
+  font-family: var(--serif);
+  font-size: 24px;
+  font-weight: 500;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.history-content {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+}
+
+.history-empty {
+  display: grid;
+  flex: 1;
+  place-content: center;
+  justify-items: center;
+  padding: 30px;
+  color: var(--faint);
+  text-align: center;
+}
+
+.history-empty p {
+  margin: 13px 0 4px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.history-empty span {
+  font-size: 11px;
+}
+
 .dialog-close {
   position: absolute;
   top: 12px;
@@ -1728,6 +1864,32 @@ kbd {
 
   .vault-card {
     padding-inline: 24px;
+  }
+
+  .history-dialog {
+    height: calc(100svh - 30px);
+  }
+
+  .history-body {
+    grid-template-columns: 1fr;
+    grid-template-rows: 150px minmax(0, 1fr);
+  }
+
+  .history-list {
+    display: flex;
+    gap: 7px;
+    overflow-x: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .history-list button {
+    width: 170px;
+    flex: 0 0 auto;
+  }
+
+  .history-preview-header {
+    padding: 14px 17px;
   }
 }
 

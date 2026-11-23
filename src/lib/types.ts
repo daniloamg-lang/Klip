@@ -1,3 +1,10 @@
+export interface NoteRevision {
+  id: string
+  title: string
+  content: string
+  savedAt: string
+}
+
 export interface Note {
   id: string
   title: string
@@ -6,6 +13,7 @@ export interface Note {
   tags: string[]
   createdAt: string
   updatedAt: string
+  revisions?: NoteRevision[]
 }
 
 export interface Folder {
