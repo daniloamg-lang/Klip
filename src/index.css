@@ -1,0 +1,108 @@
+:root {
+  font-family: 'Aptos', 'Segoe UI', system-ui, sans-serif;
+  color: #292824;
+  background: #f4f2ec;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  --page: #f4f2ec;
+  --surface: #fbfaf7;
+  --surface-2: #eeece5;
+  --surface-3: #e6e3db;
+  --ink: #292824;
+  --muted: #79766e;
+  --faint: #a3a097;
+  --line: #dcd8ce;
+  --accent: #c26b43;
+  --accent-soft: #f0d9cc;
+  --accent-ink: #8c4627;
+  --green: #4a785f;
+  --shadow: 0 24px 70px rgba(40, 34, 27, 0.14);
+  --serif: 'Iowan Old Style', 'Baskerville', Georgia, serif;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  color: #e9e5dc;
+  background: #10100f;
+  --page: #10100f;
+  --surface: #171715;
+  --surface-2: #1d1d1a;
+  --surface-3: #25241f;
+  --ink: #e9e5dc;
+  --muted: #9d998f;
+  --faint: #706d65;
+  --line: #302f2a;
+  --accent: #dc865d;
+  --accent-soft: #3b271f;
+  --accent-ink: #eea783;
+  --green: #72a88c;
+  --shadow: 0 30px 80px rgba(0, 0, 0, 0.4);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-width: 320px;
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  min-height: 100vh;
+  background: var(--page);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  color: inherit;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+::selection {
+  color: var(--ink);
+  background: var(--accent-soft);
+}
+
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+::-webkit-scrollbar-thumb {
+  border-radius: 99px;
+  background: var(--surface-3);
+}
+
+:root[data-edge-to-edge] body {
+  padding: env(safe-area-inset-top) env(safe-area-inset-right)
+    env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+:root[data-edge-to-edge] #root {
+  min-height: calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+}

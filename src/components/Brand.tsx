@@ -1,0 +1,12 @@
+export function Brand({ compact = false }: { compact?: boolean }) {
+  return (
+    <div className={`brand ${compact ? 'brand-compact' : ''}`} aria-label="Klip">
+      <span className="brand-mark" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+      </span>
+      {!compact && <span>Klip</span>}
+    </div>
+  )
+}
