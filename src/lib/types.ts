@@ -29,6 +29,20 @@ export interface VaultRecord {
   updatedAt: string
 }
 
+export interface CloudSnapshot {
+  user_id: string
+  revision: number
+  key_salt: string
+  payload: unknown
+  updated_at: string
+}
+
+export interface EncryptedWorkspaceEnvelope {
+  formatVersion: 1
+  iv: string
+  ciphertext: string
+}
+
 export interface NoteLink {
   targetTitle: string
   label: string

@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm'
 import {
   ArrowLeft,
   ChevronDown,
+  Cloud,
   CloudOff,
   Eye,
   FileText,
@@ -24,6 +25,7 @@ import {
 import { Brand } from './Brand'
 import { FolderTree } from './FolderTree'
 import { GraphView } from './GraphView'
+import { SyncDialog } from './SyncDialog'
 import { incomingNotes, markdownWithWikiLinks, noteByTitle, outgoingNotes, renameWikiLinks } from '../lib/links'
 import { useTheme } from '../lib/theme'
 import { saveVault } from '../lib/vault'
@@ -40,12 +42,18 @@ interface WorkspaceAppProps {
   initialWorkspace: Workspace
   cryptoKey: CryptoKey
   onLock: () => void
+  onCloudDownloaded: (workspace: Workspace, key: CryptoKey) => void
 }
 
 type MainView = 'note' | 'graph'
 type EditorMode = 'write' | 'read'
 
-export function WorkspaceApp({ initialWorkspace, cryptoKey, onLock }: WorkspaceAppProps) {
+export function WorkspaceApp({
+  initialWorkspace,
+  cryptoKey,
+  onLock,
+  onCloudDownloaded,
+}: WorkspaceAppProps) {
   const [workspace, setWorkspaceState] = useState(initialWorkspace)
   const [activeNoteId, setActiveNoteId] = useState<string | null>(initialWorkspace.notes[0]?.id ?? null)
   const [selectedFolderId, setSelectedFolderId] = useState<string | null | undefined>(undefined)
@@ -55,6 +63,7 @@ export function WorkspaceApp({ initialWorkspace, cryptoKey, onLock }: WorkspaceA
   const [mainView, setMainView] = useState<MainView>('note')
   const [editorMode, setEditorMode] = useState<EditorMode>('write')
   const [localGraph, setLocalGraph] = useState(false)
+  const [syncOpen, setSyncOpen] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [mobileNoteOpen, setMobileNoteOpen] = useState(false)
   const [railCollapsed, setRailCollapsed] = useState(false)
@@ -297,6 +306,9 @@ export function WorkspaceApp({ initialWorkspace, cryptoKey, onLock }: WorkspaceA
             setSidebarOpen(false)
           }} title="Connection graph">
             <Network size={17} /> {!railCollapsed && <span>Graph</span>}
+          </button>
+          <button className="rail-icon-button" onClick={() => setSyncOpen(true)} title="Encrypted cloud sync">
+            <Cloud size={17} /> {!railCollapsed && <span>Cloud sync</span>}
           </button>
           <button className="rail-icon-button" onClick={toggleTheme} title="Toggle color theme">
             {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
@@ -576,6 +588,14 @@ export function WorkspaceApp({ initialWorkspace, cryptoKey, onLock }: WorkspaceA
             <footer><span><CloudOff size={13} /> Local vault</span><span>{workspace.notes.length} notes</span></footer>
           </div>
         </div>
+      )}
+      {syncOpen && (
+        <SyncDialog
+          workspace={workspace}
+          cryptoKey={cryptoKey}
+          onCloudDownloaded={onCloudDownloaded}
+          onClose={() => setSyncOpen(false)}
+        />
       )}
     </main>
   )

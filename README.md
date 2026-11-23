@@ -13,11 +13,14 @@ Klip is a private, local-first connected notebook. It is an installable PWA with
 - Light/dark themes that update installed-app browser chrome
 - Android standalone edge-to-edge and safe-area handling
 - Offline-capable PWA for desktop and phone installation
+- Explicit encrypted cloud upload/download with AAL2 TOTP authentication
 
 ## Run locally
 
 ```powershell
 npm ci
+Copy-Item .env.example .env.local
+# Fill in the two public Supabase client values
 npm run dev
 ```
 
@@ -31,14 +34,30 @@ npm run build
 
 ## Privacy model
 
-The passphrase derives an AES-256-GCM key with PBKDF2. The workspace is encrypted before it is stored in IndexedDB. The passphrase and key are not persisted, and this version does not upload content.
+The passphrase derives an AES-256-GCM key with PBKDF2. The workspace is encrypted before it is
+stored in IndexedDB. The passphrase and key are not persisted. Cloud upload is explicit and sends
+only a separately encrypted envelope.
 
 The passphrase cannot be recovered. Clearing browser storage deletes the local vault unless a future backup/export flow is used.
+
+Cloud synchronization stores only an encrypted envelope. Apply
+[`supabase/migrations/20261122000000_klip_workspace.sql`](./supabase/migrations/20261122000000_klip_workspace.sql)
+in the Supabase SQL Editor. Klip uses an isolated `klip_workspace_state` table and does not read or
+overwrite Escriva's workspace.
 
 ## Deployment
 
 The included GitHub Actions workflow publishes `dist` to GitHub Pages. Enable **GitHub Actions** as the Pages source in repository settings and run the workflow. The Vite base path is calculated for project and user/organization pages.
 
-## Planned next step
+## Supabase configuration
 
-Encrypted Supabase synchronization can reuse Escriva's authentication, AAL2, revision, conflict, and encryption infrastructure. It is separate from this local-first MVP so the note and folder model can stabilize first.
+Reuse the same Supabase project and single administrator account as Escriva, or create a separate
+project. In Supabase Authentication settings, disable public signups and add
+`https://daniloamg-lang.github.io/Klip/` to the allowed redirect URLs. Configure the repository's
+GitHub Actions variables:
+
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_PUBLISHABLE_KEY`
+
+These values are public client configuration, not service-role secrets. AAL2 TOTP is required by the
+database policies before Klip can read or write synchronized ciphertext.
