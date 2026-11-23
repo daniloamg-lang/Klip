@@ -24,6 +24,7 @@ import {
 } from 'lucide-react'
 import { Brand } from './Brand'
 import { FolderTree } from './FolderTree'
+import { FolderDialog } from './FolderDialog'
 import { GraphView } from './GraphView'
 import { SyncDialog } from './SyncDialog'
 import { incomingNotes, markdownWithWikiLinks, noteByTitle, outgoingNotes, renameWikiLinks } from '../lib/links'
@@ -64,6 +65,7 @@ export function WorkspaceApp({
   const [editorMode, setEditorMode] = useState<EditorMode>('write')
   const [localGraph, setLocalGraph] = useState(false)
   const [syncOpen, setSyncOpen] = useState(false)
+  const [folderDialogParent, setFolderDialogParent] = useState<string | null | undefined>(undefined)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [mobileNoteOpen, setMobileNoteOpen] = useState(false)
   const [railCollapsed, setRailCollapsed] = useState(false)
@@ -131,6 +133,7 @@ export function WorkspaceApp({
       if (event.key === 'Escape') {
         setSearchOpen(false)
         setSidebarOpen(false)
+        setFolderDialogParent(undefined)
       }
     }
     window.addEventListener('keydown', onKeyDown)
@@ -180,13 +183,17 @@ export function WorkspaceApp({
   }
 
   function addFolder(parentId: string | null) {
-    const suggested = parentId ? 'Subfolder' : 'New folder'
-    const name = window.prompt('Folder name', suggested)?.trim()
-    if (!name) return
+    setFolderDialogParent(parentId)
+  }
+
+  function createFolderFromDialog(name: string) {
+    const parentId = folderDialogParent ?? null
     const folder = createFolder(name, parentId)
     setWorkspace((current) => ({ ...current, folders: [...current.folders, folder] }))
     setExpandedIds((current) => new Set([...current, ...(parentId ? [parentId] : [])]))
     setSelectedFolderId(folder.id)
+    setFolderDialogParent(undefined)
+    setSidebarOpen(false)
   }
 
   function removeFolder(folder: Folder) {
@@ -595,6 +602,16 @@ export function WorkspaceApp({
           cryptoKey={cryptoKey}
           onCloudDownloaded={onCloudDownloaded}
           onClose={() => setSyncOpen(false)}
+        />
+      )}
+      {folderDialogParent !== undefined && (
+        <FolderDialog
+          parentName={workspace.folders.find((folder) => folder.id === folderDialogParent)?.name}
+          existingNames={workspace.folders
+            .filter((folder) => folder.parentId === folderDialogParent)
+            .map((folder) => folder.name)}
+          onCreate={createFolderFromDialog}
+          onClose={() => setFolderDialogParent(undefined)}
         />
       )}
     </main>
