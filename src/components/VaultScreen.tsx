@@ -320,7 +320,7 @@ export function VaultScreen({ onUnlocked }: VaultScreenProps) {
 
   async function replaceCloudVault(event: FormEvent) {
         event.preventDefault()
-        if (!supabase || !session || !remote) return
+        if (!supabase || !session) return
         if (resetConfirmation !== 'REPLACE') {
           setError('Type REPLACE exactly to confirm permanent deletion.')
           return
@@ -343,17 +343,20 @@ export function VaultScreen({ onUnlocked }: VaultScreenProps) {
             session.user.id,
             created.recovery,
           )
-          const revision = await replaceCloudWorkspace(
-            supabase,
-            envelope,
-            remote.revision,
-            salt,
-          )
+          const revision = remote
+            ? await replaceCloudWorkspace(
+              supabase,
+              envelope,
+              remote.revision,
+              salt,
+            )
+            : await saveCloudWorkspace(supabase, envelope, 0, salt)
           setRemote({
-            ...remote,
+            user_id: session.user.id,
             revision,
             key_salt: salt,
             payload: envelope,
+            updated_at: new Date().toISOString(),
           })
           setLocalExists(true)
           setNewRecoveryKey(created.recoveryKey)
@@ -411,7 +414,7 @@ export function VaultScreen({ onUnlocked }: VaultScreenProps) {
           {stage === 'passphrase'
             ? passphraseTitle
             : stage === 'recovery' ? 'Recover your vault'
-            : stage === 'replace' ? 'Replace the inaccessible vault'
+            : stage === 'replace' ? 'Create a new vault'
             : stage === 'show-recovery' ? 'Your recovery key'
             : stage.startsWith('mfa') ? 'Verify your identity' : 'Sign in to Klip'}
         </h1>
@@ -423,7 +426,9 @@ export function VaultScreen({ onUnlocked }: VaultScreenProps) {
             : stage === 'recovery'
               ? 'Enter the one-time recovery key saved in your password manager.'
             : stage === 'replace'
-              ? 'This permanently overwrites the encrypted cloud copy. Existing notes cannot be recovered afterward.'
+              ? remote
+                ? 'This permanently overwrites the encrypted cloud copy. Existing notes cannot be recovered afterward.'
+                : 'This permanently overwrites the encrypted vault on this device. Create the replacement only after trying your recovery key.'
             : stage === 'show-recovery'
               ? 'Store this key in a password manager now. Klip cannot show it again, and it can recover the vault without the passphrase.'
             : stage.startsWith('mfa')
@@ -486,10 +491,10 @@ export function VaultScreen({ onUnlocked }: VaultScreenProps) {
                 {busy ? 'Opening…' : remote || localExists ? 'Unlock Klip' : 'Create vault'}
               </button>
             </form>
-            {remote && (
+            {(remote || localExists) && (
               <div className="vault-recovery-actions">
                 <button type="button" onClick={() => setStage('recovery')}>Use recovery key</button>
-                <button type="button" onClick={() => setStage('replace')}>Replace inaccessible vault</button>
+                <button type="button" onClick={() => setStage('replace')}>Create a new vault</button>
               </div>
             )}
           </>
@@ -503,11 +508,14 @@ export function VaultScreen({ onUnlocked }: VaultScreenProps) {
         )}
         {stage === 'replace' && (
           <form onSubmit={replaceCloudVault}>
-            <div className="vault-warning"><TriangleAlert size={18} /> All current cloud notes will become unrecoverable.</div>
+            <div className="vault-warning">
+              <TriangleAlert size={18} />
+              {remote ? 'All current cloud notes will become unrecoverable.' : 'All notes in the current local vault will become unrecoverable.'}
+            </div>
             <label>New vault passphrase<input autoFocus type={visible ? 'text' : 'password'} autoComplete="new-password" minLength={8} value={passphrase} onChange={(event) => setPassphrase(event.target.value)} required /></label>
             <label>Confirm new passphrase<input type={visible ? 'text' : 'password'} autoComplete="new-password" minLength={8} value={confirmation} onChange={(event) => setConfirmation(event.target.value)} required /></label>
             <label>Type REPLACE to confirm<input value={resetConfirmation} onChange={(event) => setResetConfirmation(event.target.value)} required /></label>
-            <button className="primary-button vault-submit danger" disabled={busy}>{busy ? 'Replacing…' : 'Permanently replace vault'}</button>
+            <button className="primary-button vault-submit danger" disabled={busy}>{busy ? 'Creating…' : 'Permanently create new vault'}</button>
             <button type="button" className="vault-text-button" onClick={() => setStage('passphrase')}>Cancel</button>
           </form>
         )}
