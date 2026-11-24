@@ -4,6 +4,7 @@ import { Cloud, Eye, EyeOff, Fingerprint, KeyRound, LockKeyhole, ShieldCheck, Tr
 import { Brand } from './Brand'
 import { fetchCloudWorkspace, replaceCloudWorkspace, saveCloudWorkspace } from '../lib/cloud-sync'
 import { isSupabaseConfigured, supabase } from '../lib/supabase'
+import { useAppBackNavigation } from '../lib/app-back-navigation'
 import type { CloudSnapshot, RecoveryBundle, Workspace } from '../lib/types'
 import {
   attachRecoveryToVault,
@@ -65,6 +66,25 @@ export function VaultScreen({ onUnlocked }: VaultScreenProps) {
   } | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+
+  useAppBackNavigation({
+    onBack: () => {
+      if (stage === 'recovery' || stage === 'replace') {
+        setStage('passphrase')
+        return true
+      }
+      if (stage === 'show-recovery') {
+        if (!window.confirm('Go back without confirming that you saved the recovery key?')) {
+          return true
+        }
+        setPendingUnlock(null)
+        setStage('passphrase')
+        return true
+      }
+      return false
+    },
+    exitMessage: 'Do you want to exit Klip?',
+  })
 
   useEffect(() => {
     async function start() {

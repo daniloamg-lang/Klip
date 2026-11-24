@@ -37,6 +37,7 @@ import { useTheme } from '../lib/theme'
 import { decryptCloudWorkspace, replaceVault, saveVault, sealWorkspace } from '../lib/vault'
 import { sortedNotes, uniqueTitle } from '../lib/workspace'
 import { restoredFromRevision, withRevision } from '../lib/history'
+import { useAppBackNavigation } from '../lib/app-back-navigation'
 import {
   createFolder,
   createNote,
@@ -90,6 +91,41 @@ export function WorkspaceApp({
   const localSaveDirty = useRef(false)
   const skipNextSave = useRef(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  useAppBackNavigation({
+    onBack: () => {
+      if (folderDialogParent !== undefined) {
+        setFolderDialogParent(undefined)
+        return true
+      }
+      if (historyOpen) {
+        setHistoryOpen(false)
+        return true
+      }
+      if (syncOpen) {
+        setSyncOpen(false)
+        return true
+      }
+      if (searchOpen) {
+        setSearchOpen(false)
+        return true
+      }
+      if (sidebarOpen) {
+        setSidebarOpen(false)
+        return true
+      }
+      if (mainView === 'graph') {
+        setMainView('note')
+        return true
+      }
+      if (mobileNoteOpen) {
+        setMobileNoteOpen(false)
+        return true
+      }
+      return false
+    },
+    exitMessage: 'Do you want to exit Klip?',
+  })
 
   function setWorkspace(next: SetStateAction<Workspace>) {
     localSaveDirty.current = true
