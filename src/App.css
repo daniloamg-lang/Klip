@@ -1347,8 +1347,9 @@ kbd {
   width: 100%;
   min-height: 430px;
   resize: vertical;
-  padding: 0;
-  border: 0;
+  padding: 15px 16px;
+  border: 1px solid color-mix(in srgb, var(--line) 62%, transparent);
+  border-radius: 8px;
   outline: 0;
   color: var(--ink);
   background: transparent;
@@ -1356,6 +1357,11 @@ kbd {
   font-size: 15px;
   line-height: 1.9;
   tab-size: 2;
+}
+
+.note-editor:focus {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
 .note-editor::placeholder {
