@@ -430,7 +430,7 @@ export function VaultScreen({ onUnlocked }: VaultScreenProps) {
               ? stage === 'mfa-enroll'
                 ? 'Scan this code with your authenticator, then enter the temporary code.'
                 : 'Enter the six-digit code from your authenticator.'
-              : 'Sign in with the email and password of the same account you use in Escriva—not your Supabase dashboard credentials.'}
+              : 'Sign in with the email and password from Klip’s private Supabase account—not your Supabase dashboard credentials.'}
         </p>
 
         {stage === 'sign-in' && (
