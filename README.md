@@ -5,7 +5,9 @@ Klip is a private, local-first connected notebook. It is an installable PWA with
 ## Features
 
 - One encrypted IndexedDB vault protected by a passphrase
-- `[[wiki links]]` and aliases such as `[[Note title|visible text]]`
+- `;;page links;;` with note suggestions, aliases, click navigation, and long-press editing
+- `::label::` URL links with a destination prompt, external navigation, and long-press editing
+- Legacy `[[wiki links]]` and aliases remain supported
 - Automatic link target updates when a note is renamed
 - Global and current-note connection graphs
 - Outgoing links and backlinks for every note

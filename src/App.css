@@ -1465,6 +1465,50 @@ kbd {
   background: var(--accent-soft);
 }
 
+.link-dialog {
+  position: relative;
+  width: min(440px, 100%);
+  padding: 30px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: 0 35px 100px rgba(0, 0, 0, 0.35);
+}
+
+.link-dialog h2 {
+  margin: 0 0 22px;
+  font-family: var(--serif);
+  font-size: 25px;
+  font-weight: 500;
+}
+
+.link-dialog form {
+  display: grid;
+  gap: 14px;
+}
+
+.link-dialog label {
+  display: grid;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.link-dialog input {
+  width: 100%;
+  height: 43px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  background: var(--page);
+}
+
+.markdown-preview a,
+.wiki-link {
+  touch-action: manipulation;
+}
+
 .empty-preview {
   color: var(--faint);
   font-style: italic;

@@ -81,6 +81,13 @@ export function WorkspaceApp({
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'syncing' | 'error'>('saved')
   const [saveError, setSaveError] = useState('')
   const [cursorPosition, setCursorPosition] = useState(0)
+  const [pendingUrl, setPendingUrl] = useState<{
+    label: string
+    start: number
+    end: number
+  } | null>(null)
+  const [urlInput, setUrlInput] = useState('')
+  const [editingLink, setEditingLink] = useState<{ kind: 'page' | 'url'; value: string } | null>(null)
   const [theme, toggleTheme] = useTheme()
   const saveSequence = useRef(0)
   const cloudRevision = useRef(cloudVault?.revision ?? 0)
@@ -96,6 +103,14 @@ export function WorkspaceApp({
     onBack: () => {
       if (folderDialogParent !== undefined) {
         setFolderDialogParent(undefined)
+        return true
+      }
+      if (pendingUrl) {
+        setPendingUrl(null)
+        return true
+      }
+      if (editingLink) {
+        setEditingLink(null)
         return true
       }
       if (historyOpen) {
@@ -378,6 +393,83 @@ export function WorkspaceApp({
     }))
   }
 
+  function handleEditorChange(content: string, cursor: number) {
+    const before = content.slice(0, cursor)
+    const completed = before.match(/::([^:\n]+)::$/)
+    const alreadyConfigured = completed && content.slice(cursor).startsWith('(')
+    if (completed && !alreadyConfigured) {
+      const start = cursor - completed[0].length
+      setPendingUrl({
+        label: completed[1].trim(),
+        start,
+        end: cursor,
+      })
+      setUrlInput('')
+    }
+    updateContent(content)
+  }
+
+  function savePendingUrl(event: React.FormEvent) {
+    event.preventDefault()
+    if (!activeNote || !pendingUrl) return
+    const url = normalizeUrl(urlInput)
+    const replacement = `::${pendingUrl.label}::(${url})`
+    updateContent(
+      activeNote.content.slice(0, pendingUrl.start) +
+      replacement +
+      activeNote.content.slice(pendingUrl.end),
+    )
+    setPendingUrl(null)
+    window.setTimeout(() => textareaRef.current?.focus(), 0)
+  }
+
+  function editRenderedLink(kind: 'page' | 'url', value: string) {
+    setEditingLink({ kind, value })
+    const [, current] = value.split('\u0000')
+    setUrlInput(current ?? '')
+  }
+
+  function saveRenderedLink(event: React.FormEvent) {
+    event.preventDefault()
+    if (!activeNote || !editingLink) return
+    if (editingLink.kind === 'url') {
+      const [label, oldUrl] = editingLink.value.split('\u0000')
+      const nextUrl = normalizeUrl(urlInput)
+      updateContent(activeNote.content.replace(
+        `::${label}::(${oldUrl})`,
+        `::${label}::(${nextUrl})`,
+      ))
+    } else {
+      const [label, oldTarget] = editingLink.value.split('\u0000')
+      const replacement = `;;${label}|${urlInput.trim()};;`
+      updateContent(replacePageLink(
+        activeNote.content,
+        label,
+        oldTarget,
+        replacement,
+      ))
+    }
+    setEditingLink(null)
+  }
+
+  function onLinkPointerDown(
+    event: React.PointerEvent<HTMLElement>,
+    kind: 'page' | 'url',
+    value: string,
+  ) {
+    const element = event.currentTarget
+    const timer = window.setTimeout(() => {
+      editRenderedLink(kind, value)
+      element.dataset.longPressed = 'true'
+    }, 550)
+    element.dataset.longPressTimer = String(timer)
+  }
+
+  function onLinkPointerUp(event: React.PointerEvent<HTMLElement>) {
+    const value = event.currentTarget.dataset.longPressTimer
+    if (value) window.clearTimeout(Number(value))
+  }
+
   function restoreRevision(revision: NoteRevision) {
     if (!activeNote) return
     updateNote(activeNote.id, (note) => restoredFromRevision(note, revision))
@@ -406,9 +498,14 @@ export function WorkspaceApp({
     const textarea = textareaRef.current
     if (!textarea || !activeNote) return
     const cursor = textarea.selectionStart
-    const open = activeNote.content.lastIndexOf('[[', cursor)
-    const content = `${activeNote.content.slice(0, open)}[[${note.title}]]${activeNote.content.slice(cursor)}`
-    const nextCursor = open + note.title.length + 4
+    const doubleBracketOpen = activeNote.content.lastIndexOf('[[', cursor)
+    const semicolonOpen = activeNote.content.lastIndexOf(';;', cursor)
+    const open = Math.max(doubleBracketOpen, semicolonOpen)
+    const replacement = doubleBracketOpen > semicolonOpen
+      ? `[[${note.title}]]`
+      : `;;${note.title};;`
+    const content = `${activeNote.content.slice(0, open)}${replacement}${activeNote.content.slice(cursor)}`
+    const nextCursor = open + replacement.length
     updateNote(activeNote.id, (current) => ({
       ...current,
       content,
@@ -661,7 +758,7 @@ export function WorkspaceApp({
                       value={activeNote.content}
                       onChange={(event) => {
                         setCursorPosition(event.target.selectionStart)
-                        updateContent(event.target.value)
+                        handleEditorChange(event.target.value, event.target.selectionStart)
                       }}
                       onClick={(event) => setCursorPosition(event.currentTarget.selectionStart)}
                       onKeyUp={(event) => setCursorPosition(event.currentTarget.selectionStart)}
@@ -676,7 +773,7 @@ export function WorkspaceApp({
                           window.setTimeout(() => target.setSelectionRange(start + 2, start + 2), 0)
                         }
                       }}
-                      placeholder={'Start writing…\n\nUse [[Note title]] to connect another page.\nMarkdown is supported.'}
+                      placeholder={'Start writing…\n\nUse ;;Page title;; to link a page.\nUse ::Label:: to add a URL.\nMarkdown is supported.'}
                       spellCheck
                     />
                     {currentWikiQuery !== null && suggestions.length > 0 && (
@@ -698,11 +795,40 @@ export function WorkspaceApp({
                       components={{
                         a: ({ href, children, ...props }) => {
                           if (href?.startsWith('#note=')) {
-                            return <button className="wiki-link" onClick={() => navigateWikiLink(decodeURIComponent(href.slice(6)))}>
+                            const target = decodeURIComponent(href.slice(6))
+                            const label = String(children)
+                            return <button
+                              className="wiki-link"
+                              onPointerDown={(event) => onLinkPointerDown(event, 'page', `${label}\u0000${target}`)}
+                              onPointerUp={onLinkPointerUp}
+                              onPointerLeave={onLinkPointerUp}
+                              onClick={(event) => {
+                                if (event.currentTarget.dataset.longPressed === 'true') {
+                                  event.currentTarget.dataset.longPressed = 'false'
+                                  return
+                                }
+                                navigateWikiLink(target)
+                              }}
+                            >
                               {children}
                             </button>
                           }
-                          return <a href={href} {...props}>{children}</a>
+                          const label = String(children)
+                          return <a
+                            href={href}
+                            target="_blank"
+                            rel="noreferrer"
+                            onPointerDown={(event) => onLinkPointerDown(event, 'url', `${label}\u0000${href ?? ''}`)}
+                            onPointerUp={onLinkPointerUp}
+                            onPointerLeave={onLinkPointerUp}
+                            onClick={(event) => {
+                              if (event.currentTarget.dataset.longPressed === 'true') {
+                                event.preventDefault()
+                                event.currentTarget.dataset.longPressed = 'false'
+                              }
+                            }}
+                            {...props}
+                          >{children}</a>
                         },
                       }}
                     >
@@ -724,7 +850,7 @@ export function WorkspaceApp({
                     {outgoing.map((note) => (
                       <button key={note.id} onClick={() => openNote(note.id)}><FileText size={14} /> {note.title}</button>
                     ))}
-                    {!outgoing.length && <p>Type [[ to link a page.</p>}
+                    {!outgoing.length && <p>Type ;; to link a page.</p>}
                   </section>
                   <section>
                     <h3>Backlinks <span>{backlinks.length}</span></h3>
@@ -780,6 +906,26 @@ export function WorkspaceApp({
           onClose={() => setSyncOpen(false)}
         />
       )}
+      {pendingUrl && (
+        <LinkDialog
+          title={`Add URL for “${pendingUrl.label}”`}
+          value={urlInput}
+          onValueChange={setUrlInput}
+          onClose={() => setPendingUrl(null)}
+          onSubmit={savePendingUrl}
+          placeholder="https://example.com"
+        />
+      )}
+      {editingLink && (
+        <LinkDialog
+          title={editingLink.kind === 'url' ? 'Edit link URL' : 'Edit page link'}
+          value={urlInput}
+          onValueChange={setUrlInput}
+          onClose={() => setEditingLink(null)}
+          onSubmit={saveRenderedLink}
+          placeholder={editingLink.kind === 'url' ? 'https://example.com' : 'Note title'}
+        />
+      )}
       {folderDialogParent !== undefined && (
         <FolderDialog
           parentName={workspace.folders.find((folder) => folder.id === folderDialogParent)?.name}
@@ -816,7 +962,79 @@ function relativeDate(value: string) {
 
 function wikiQuery(content: string, cursor: number): string | null {
   const before = content.slice(0, cursor)
-  const open = before.lastIndexOf('[[')
-  if (open < 0 || before.lastIndexOf(']]', open) > open) return null
-  return before.slice(open + 2).toLocaleLowerCase()
+  const doubleBracketOpen = before.lastIndexOf('[[')
+  const semicolonOpen = before.lastIndexOf(';;', cursor)
+  const open = Math.max(doubleBracketOpen, semicolonOpen)
+  if (open < 0) return null
+  const closing = open === doubleBracketOpen ? ']]' : ';;'
+  const query = before.slice(open + 2)
+  if (query.includes(closing)) return null
+  return query.toLocaleLowerCase()
+}
+
+function normalizeUrl(value: string): string {
+  const trimmed = value.trim()
+  return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
+}
+
+function replacePageLink(
+  content: string,
+  label: string,
+  oldTarget: string,
+  replacement: string,
+): string {
+  const candidates = [
+    `;;${label}|${oldTarget};;`,
+    `;;${oldTarget};;`,
+    `[[${oldTarget}|${label}]]`,
+  ]
+  for (const candidate of candidates) {
+    if (content.includes(candidate)) return content.replace(candidate, replacement)
+  }
+  return content
+}
+
+interface LinkDialogProps {
+  title: string
+  value: string
+  placeholder: string
+  onValueChange: (value: string) => void
+  onClose: () => void
+  onSubmit: (event: React.FormEvent) => void
+}
+
+function LinkDialog({
+  title,
+  value,
+  placeholder,
+  onValueChange,
+  onClose,
+  onSubmit,
+}: LinkDialogProps) {
+  return (
+    <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => {
+      if (event.target === event.currentTarget) onClose()
+    }}>
+      <section className="link-dialog" role="dialog" aria-modal="true" aria-label={title}>
+        <button className="icon-button dialog-close" onClick={onClose} aria-label="Close"><X size={18} /></button>
+        <h2>{title}</h2>
+        <form onSubmit={onSubmit}>
+          <label>
+            Destination
+            <input
+              autoFocus
+              required
+              value={value}
+              onChange={(event) => onValueChange(event.target.value)}
+              placeholder={placeholder}
+            />
+          </label>
+          <div className="folder-dialog-actions">
+            <button type="button" className="secondary-button" onClick={onClose}>Cancel</button>
+            <button className="primary-button" type="submit">Save link</button>
+          </div>
+        </form>
+      </section>
+    </div>
+  )
 }

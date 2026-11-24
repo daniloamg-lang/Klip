@@ -48,4 +48,18 @@ describe('wiki links', () => {
       'Read [the notes](#note=Design%20Notes).',
     )
   })
+
+  it('supports semicolon page links and URL links', () => {
+    const content = 'Open ;;Beta;; or ::Wikipedia::(https://wikipedia.org).'
+    expect(linksFromContent(content)).toContainEqual({ targetTitle: 'Beta', label: 'Beta' })
+    expect(markdownWithWikiLinks(content)).toBe(
+      'Open [Beta](#note=Beta) or [Wikipedia](https://wikipedia.org).',
+    )
+  })
+
+  it('renames semicolon page links while preserving aliases', () => {
+    expect(renameWikiLinks('See ;;the notes|Old;;.', 'Old', 'New')).toBe(
+      'See ;;the notes|New;;.',
+    )
+  })
 })
