@@ -35,6 +35,7 @@ export interface VaultRecord {
   iv: string
   ciphertext: string
   updatedAt: string
+  recovery?: RecoveryBundle
 }
 
 export interface CloudSnapshot {
@@ -47,6 +48,14 @@ export interface CloudSnapshot {
 
 export interface EncryptedWorkspaceEnvelope {
   formatVersion: 1
+  iv: string
+  ciphertext: string
+  recovery?: RecoveryBundle
+}
+
+export interface RecoveryBundle {
+  formatVersion: 1
+  salt: string
   iv: string
   ciphertext: string
 }

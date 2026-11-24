@@ -2,6 +2,7 @@ import { localDatabase } from './database'
 import {
   emptyWorkspace,
   type EncryptedWorkspaceEnvelope,
+  type RecoveryBundle,
   type VaultRecord,
   type Workspace,
 } from './types'
@@ -32,7 +33,7 @@ async function deriveKey(passphrase: string, salt: Uint8Array<ArrayBuffer>): Pro
     { name: 'PBKDF2', salt, iterations, hash: 'SHA-256' },
     material,
     { name: 'AES-GCM', length: 256 },
-    false,
+    true,
     ['encrypt', 'decrypt'],
   )
 }
@@ -56,32 +57,54 @@ export async function vaultSalt(): Promise<string> {
   return record.salt
 }
 
+export async function vaultRecovery(): Promise<RecoveryBundle | undefined> {
+  const record = await localDatabase.vaults.get('local')
+  if (!record) throw new Error('No local vault was found.')
+  return record.recovery
+}
+
 export async function createVault(passphrase: string): Promise<{
   key: CryptoKey
   workspace: Workspace
+  recoveryKey?: string
+  recovery?: RecoveryBundle
 }> {
   const salt = crypto.getRandomValues(new Uint8Array(16))
   const iv = crypto.getRandomValues(new Uint8Array(12))
   const key = await deriveKey(passphrase, salt)
   const workspace = emptyWorkspace()
+  const generatedRecovery = await createRecovery(key)
   await localDatabase.vaults.put({
     id: 'local',
     salt: bytesToBase64(salt),
     iv: bytesToBase64(iv),
     ciphertext: await encrypt(workspace, key, iv),
     updatedAt: new Date().toISOString(),
+    recovery: generatedRecovery.recovery,
   })
-  return { key, workspace }
+  return {
+    key,
+    workspace,
+    recoveryKey: generatedRecovery.recoveryKey,
+    recovery: generatedRecovery.recovery,
+  }
 }
 
 export async function unlockVault(passphrase: string): Promise<{
   key: CryptoKey
   workspace: Workspace
+  recovery?: RecoveryBundle
 }> {
   const record = await localDatabase.vaults.get('local')
   if (!record) throw new Error('No local vault was found.')
   const salt = base64ToBytes(record.salt)
   const key = await deriveKey(passphrase, salt)
+  return { ...(await openVaultWithKey(key)), recovery: record.recovery }
+}
+
+export async function openVaultWithKey(key: CryptoKey): Promise<{ key: CryptoKey; workspace: Workspace }> {
+  const record = await localDatabase.vaults.get('local')
+  if (!record) throw new Error('No local vault was found.')
   try {
     const plaintext = await crypto.subtle.decrypt(
       { name: 'AES-GCM', iv: base64ToBytes(record.iv) },
@@ -114,10 +137,85 @@ export async function saveVault(workspace: Workspace, key: CryptoKey): Promise<v
   await localDatabase.vaults.put(nextRecord)
 }
 
+async function deriveRecoveryKey(recoveryKey: string, salt: Uint8Array<ArrayBuffer>) {
+  const material = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(recoveryKey),
+    'PBKDF2',
+    false,
+    ['deriveKey'],
+  )
+  return crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt, iterations, hash: 'SHA-256' },
+    material,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt'],
+  )
+}
+
+export async function createRecovery(
+  key: CryptoKey,
+): Promise<{ recoveryKey: string; recovery: RecoveryBundle }> {
+    const random = crypto.getRandomValues(new Uint8Array(32))
+    const recoveryKey = bytesToBase64(random)
+      .replaceAll('+', '-')
+      .replaceAll('/', '_')
+      .replace(/=+$/, '')
+    const salt = crypto.getRandomValues(new Uint8Array(16))
+    const iv = crypto.getRandomValues(new Uint8Array(12))
+    const wrappingKey = await deriveRecoveryKey(recoveryKey, salt)
+    const rawKey = await crypto.subtle.exportKey('raw', key)
+    const ciphertext = await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv },
+      wrappingKey,
+      rawKey,
+    )
+    return {
+      recoveryKey,
+      recovery: {
+        formatVersion: 1,
+        salt: bytesToBase64(salt),
+        iv: bytesToBase64(iv),
+        ciphertext: bytesToBase64(new Uint8Array(ciphertext)),
+      },
+    }
+}
+
+export async function recoverKey(
+  recoveryKey: string,
+  bundle: RecoveryBundle,
+): Promise<CryptoKey> {
+    try {
+      const wrappingKey = await deriveRecoveryKey(recoveryKey.trim(), base64ToBytes(bundle.salt))
+      const rawKey = await crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv: base64ToBytes(bundle.iv) },
+        wrappingKey,
+        base64ToBytes(bundle.ciphertext),
+      )
+      return crypto.subtle.importKey(
+        'raw',
+        rawKey,
+        { name: 'AES-GCM', length: 256 },
+        true,
+        ['encrypt', 'decrypt'],
+      )
+    } catch {
+      throw new Error('That recovery key did not unlock your vault.')
+    }
+}
+
+export async function attachRecoveryToVault(recovery: RecoveryBundle): Promise<void> {
+  const record = await localDatabase.vaults.get('local')
+  if (!record) throw new Error('No local vault was found.')
+  await localDatabase.vaults.put({ ...record, recovery })
+}
+
 export async function sealWorkspace(
   workspace: Workspace,
   key: CryptoKey,
   userId: string,
+  recovery?: RecoveryBundle,
 ): Promise<EncryptedWorkspaceEnvelope> {
   const iv = crypto.getRandomValues(new Uint8Array(12))
   const ciphertext = await crypto.subtle.encrypt(
@@ -129,7 +227,27 @@ export async function sealWorkspace(
     formatVersion: 1,
     iv: bytesToBase64(iv),
     ciphertext: bytesToBase64(new Uint8Array(ciphertext)),
+    ...(recovery ? { recovery } : {}),
   }
+}
+
+function cloudRecovery(envelope: unknown): RecoveryBundle | undefined {
+  if (
+    typeof envelope === 'object' &&
+    envelope !== null &&
+    'recovery' in envelope &&
+    typeof envelope.recovery === 'object' &&
+    envelope.recovery !== null
+  ) {
+    const recovery = envelope.recovery as RecoveryBundle
+    if (
+      recovery.formatVersion === 1 &&
+      typeof recovery.salt === 'string' &&
+      typeof recovery.iv === 'string' &&
+      typeof recovery.ciphertext === 'string'
+    ) return recovery
+  }
+  return undefined
 }
 
 export async function openCloudWorkspace(
@@ -137,7 +255,7 @@ export async function openCloudWorkspace(
   passphrase: string,
   salt: string,
   envelope: unknown,
-): Promise<{ key: CryptoKey; workspace: Workspace }> {
+): Promise<{ key: CryptoKey; workspace: Workspace; recovery?: RecoveryBundle }> {
   if (
     typeof envelope !== 'object' ||
     envelope === null ||
@@ -169,11 +287,25 @@ export async function openCloudWorkspace(
     ) {
       throw new Error('Unsupported workspace.')
     }
-    return { key, workspace }
+    return { key, workspace, recovery: cloudRecovery(envelope) }
   } catch (error) {
     if (error instanceof Error && error.message === 'Unsupported workspace.') throw error
     throw new Error('The passphrase did not decrypt the cloud workspace.')
   }
+}
+
+export async function openCloudWorkspaceWithRecovery(
+  userId: string,
+  recoveryKey: string,
+  envelope: unknown,
+): Promise<{ key: CryptoKey; workspace: Workspace; recovery: RecoveryBundle }> {
+  const recovery = cloudRecovery(envelope)
+  if (!recovery) {
+    throw new Error('This vault does not have a recovery key.')
+  }
+  const key = await recoverKey(recoveryKey, recovery)
+  const workspace = await decryptCloudWorkspace(userId, key, envelope)
+  return { key, workspace, recovery }
 }
 
 export async function decryptCloudWorkspace(
@@ -217,6 +349,7 @@ export async function replaceVault(
   workspace: Workspace,
   key: CryptoKey,
   salt: string,
+  recovery?: RecoveryBundle,
 ): Promise<void> {
   const iv = crypto.getRandomValues(new Uint8Array(12))
   await localDatabase.vaults.put({
@@ -225,5 +358,6 @@ export async function replaceVault(
     iv: bytesToBase64(iv),
     ciphertext: await encrypt(workspace, key, iv),
     updatedAt: new Date().toISOString(),
+    ...(recovery ? { recovery } : {}),
   })
 }

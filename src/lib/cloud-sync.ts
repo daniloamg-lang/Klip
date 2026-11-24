@@ -39,3 +39,26 @@ export async function saveCloudWorkspace(
   }
   return data[0].revision
 }
+
+export async function replaceCloudWorkspace(
+  client: SupabaseClient,
+  envelope: EncryptedWorkspaceEnvelope,
+  expectedRevision: number,
+  keySalt: string,
+): Promise<number> {
+  const { data, error } = await client.rpc('replace_klip_workspace', {
+    p_payload: envelope,
+    p_expected_revision: expectedRevision,
+    p_key_salt: keySalt,
+  })
+  if (error) {
+    if (error.code === '40001' || error.message.includes('klip_workspace_conflict')) {
+      throw new WorkspaceConflictError()
+    }
+    throw error
+  }
+  if (!Array.isArray(data) || typeof data[0]?.revision !== 'number') {
+    throw new Error('The cloud returned an invalid synchronization result.')
+  }
+  return data[0].revision
+}

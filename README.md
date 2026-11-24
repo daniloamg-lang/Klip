@@ -44,7 +44,13 @@ The passphrase cannot be recovered. Clearing browser storage deletes the local v
 When cloud sync is configured, Klip requires account sign-in and TOTP verification before it asks
 for the vault passphrase. It then opens the latest cloud copy, keeps an encrypted local cache, and
 automatically saves and checks for cloud revisions. The vault passphrase remains separate from the
-account password.
+account password. New and upgraded vaults receive a one-time recovery key that must be stored in a
+password manager. The recovery key can decrypt the wrapped vault key but is never stored by Klip.
+
+After pulling changes containing a new migration, apply
+[`supabase/migrations/20261124000000_klip_vault_recovery.sql`](./supabase/migrations/20261124000000_klip_vault_recovery.sql)
+in the Supabase SQL Editor before using permanent vault replacement in production. Replacements
+require an AAL2 session and an explicit typed confirmation.
 
 Cloud synchronization stores only an encrypted envelope. Apply
 [`supabase/migrations/20261122000000_klip_workspace.sql`](./supabase/migrations/20261122000000_klip_workspace.sql)

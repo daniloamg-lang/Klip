@@ -133,7 +133,12 @@ export function WorkspaceApp({
       let nextSnapshot = snapshot
       do {
         syncQueued.current = false
-        const envelope = await sealWorkspace(nextSnapshot, cryptoKey, cloudVault.userId)
+        const envelope = await sealWorkspace(
+          nextSnapshot,
+          cryptoKey,
+          cloudVault.userId,
+          cloudVault.recovery,
+        )
         const revision = await saveCloudWorkspace(
           supabase,
           envelope,
@@ -202,7 +207,7 @@ export function WorkspaceApp({
           cryptoKey,
           remote.payload,
         )
-        await replaceVault(nextWorkspace, cryptoKey, cloudVault.salt)
+        await replaceVault(nextWorkspace, cryptoKey, cloudVault.salt, cloudVault.recovery)
         cloudRevision.current = remote.revision
         skipNextSave.current = true
         setWorkspaceState(nextWorkspace)

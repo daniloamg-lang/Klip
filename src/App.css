@@ -218,6 +218,81 @@ button {
   height: 33px;
 }
 
+.vault-text-button {
+  justify-self: center;
+  padding: 3px 6px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 12px;
+}
+
+.vault-text-button:hover {
+  color: var(--accent);
+}
+
+.vault-recovery-actions {
+  display: flex;
+  justify-content: center;
+  gap: 6px 16px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+
+.vault-recovery-actions button {
+  padding: 3px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 11px;
+}
+
+.vault-recovery-actions button:hover {
+  color: var(--accent);
+}
+
+.vault-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 11px;
+  border: 1px solid color-mix(in srgb, #bd4e3d 35%, transparent);
+  border-radius: 9px;
+  color: #9e3d31;
+  background: color-mix(in srgb, #bd4e3d 8%, transparent);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.vault-warning svg {
+  flex: 0 0 auto;
+}
+
+.primary-button.danger {
+  background: #aa493a;
+  box-shadow: 0 7px 20px color-mix(in srgb, #aa493a 28%, transparent);
+}
+
+.recovery-key {
+  min-height: 92px;
+  resize: none;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--ink);
+  background: var(--page);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+.recovery-hint {
+  margin: -6px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+  text-align: center;
+}
+
 .form-error,
 .save-error {
   margin: 0;
