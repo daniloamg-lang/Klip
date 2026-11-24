@@ -13,7 +13,8 @@ Klip is a private, local-first connected notebook. It is an installable PWA with
 - Light/dark themes that update installed-app browser chrome
 - Android standalone edge-to-edge and safe-area handling
 - Offline-capable PWA for desktop and phone installation
-- Explicit encrypted cloud upload/download with AAL2 TOTP authentication
+- Authenticated account sign-in followed by encrypted vault unlock
+- Automatic encrypted cloud sync with AAL2 TOTP authentication
 
 ## Run locally
 
@@ -39,6 +40,11 @@ stored in IndexedDB. The passphrase and key are not persisted. Cloud upload is e
 only a separately encrypted envelope.
 
 The passphrase cannot be recovered. Clearing browser storage deletes the local vault unless a future backup/export flow is used.
+
+When cloud sync is configured, Klip requires account sign-in and TOTP verification before it asks
+for the vault passphrase. It then opens the latest cloud copy, keeps an encrypted local cache, and
+automatically saves and checks for cloud revisions. The vault passphrase remains separate from the
+account password.
 
 Cloud synchronization stores only an encrypted envelope. Apply
 [`supabase/migrations/20261122000000_klip_workspace.sql`](./supabase/migrations/20261122000000_klip_workspace.sql)

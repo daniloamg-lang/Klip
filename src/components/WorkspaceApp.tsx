@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type SetStateAction } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type SetStateAction } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
@@ -29,9 +29,12 @@ import { FolderDialog } from './FolderDialog'
 import { HistoryDialog } from './HistoryDialog'
 import { GraphView } from './GraphView'
 import { SyncDialog } from './SyncDialog'
+import type { CloudVault } from './VaultScreen'
+import { fetchCloudWorkspace, saveCloudWorkspace } from '../lib/cloud-sync'
+import { supabase } from '../lib/supabase'
 import { incomingNotes, markdownWithWikiLinks, noteByTitle, outgoingNotes, renameWikiLinks } from '../lib/links'
 import { useTheme } from '../lib/theme'
-import { saveVault } from '../lib/vault'
+import { decryptCloudWorkspace, replaceVault, saveVault, sealWorkspace } from '../lib/vault'
 import { sortedNotes, uniqueTitle } from '../lib/workspace'
 import { restoredFromRevision, withRevision } from '../lib/history'
 import {
@@ -46,8 +49,8 @@ import {
 interface WorkspaceAppProps {
   initialWorkspace: Workspace
   cryptoKey: CryptoKey
+  cloudVault?: CloudVault
   onLock: () => void
-  onCloudDownloaded: (workspace: Workspace, key: CryptoKey) => void
 }
 
 type MainView = 'note' | 'graph'
@@ -56,8 +59,8 @@ type EditorMode = 'write' | 'read'
 export function WorkspaceApp({
   initialWorkspace,
   cryptoKey,
+  cloudVault,
   onLock,
-  onCloudDownloaded,
 }: WorkspaceAppProps) {
   const [workspace, setWorkspaceState] = useState(initialWorkspace)
   const [activeNoteId, setActiveNoteId] = useState<string | null>(initialWorkspace.notes[0]?.id ?? null)
@@ -74,14 +77,22 @@ export function WorkspaceApp({
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [mobileNoteOpen, setMobileNoteOpen] = useState(false)
   const [railCollapsed, setRailCollapsed] = useState(false)
-  const [saveState, setSaveState] = useState<'saved' | 'saving' | 'error'>('saved')
+  const [saveState, setSaveState] = useState<'saved' | 'saving' | 'syncing' | 'error'>('saved')
   const [saveError, setSaveError] = useState('')
   const [cursorPosition, setCursorPosition] = useState(0)
   const [theme, toggleTheme] = useTheme()
   const saveSequence = useRef(0)
+  const cloudRevision = useRef(cloudVault?.revision ?? 0)
+  const latestWorkspace = useRef(workspace)
+  const syncPending = useRef(false)
+  const syncBusy = useRef(false)
+  const syncQueued = useRef(false)
+  const localSaveDirty = useRef(false)
+  const skipNextSave = useRef(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   function setWorkspace(next: SetStateAction<Workspace>) {
+    localSaveDirty.current = true
     setSaveState('saving')
     setWorkspaceState(next)
   }
@@ -108,10 +119,51 @@ export function WorkspaceApp({
     : []
 
   useEffect(() => {
+    latestWorkspace.current = workspace
+  }, [workspace])
+
+  const syncToCloud = useCallback(async (snapshot: Workspace) => {
+    if (!cloudVault || !supabase) return
+    if (syncBusy.current) {
+      syncQueued.current = true
+      return
+    }
+    syncBusy.current = true
+    try {
+      let nextSnapshot = snapshot
+      do {
+        syncQueued.current = false
+        const envelope = await sealWorkspace(nextSnapshot, cryptoKey, cloudVault.userId)
+        const revision = await saveCloudWorkspace(
+          supabase,
+          envelope,
+          cloudRevision.current,
+          cloudVault.salt,
+        )
+        cloudRevision.current = revision
+        nextSnapshot = latestWorkspace.current
+      } while (syncQueued.current)
+      syncPending.current = false
+    } finally {
+      syncBusy.current = false
+    }
+  }, [cloudVault, cryptoKey])
+
+  useEffect(() => {
+    if (skipNextSave.current) {
+      skipNextSave.current = false
+      return
+    }
     const sequence = ++saveSequence.current
     const timeout = window.setTimeout(() => {
       void saveVault(workspace, cryptoKey)
-        .then(() => {
+        .then(async () => {
+          if (sequence === saveSequence.current) localSaveDirty.current = false
+          if (cloudVault && supabase) {
+            syncPending.current = true
+            if (sequence === saveSequence.current) setSaveState('syncing')
+            await syncToCloud(workspace)
+          }
           if (sequence !== saveSequence.current) return
           setSaveState('saved')
           setSaveError('')
@@ -123,7 +175,51 @@ export function WorkspaceApp({
         })
     }, 350)
     return () => window.clearTimeout(timeout)
-  }, [workspace, cryptoKey])
+  }, [workspace, cryptoKey, cloudVault, syncToCloud])
+
+  useEffect(() => {
+    const client = supabase
+    if (!cloudVault || !client) return
+    const syncFromCloud = async () => {
+      if (localSaveDirty.current || syncBusy.current || syncPending.current) {
+        if (syncPending.current && !syncBusy.current) {
+          try {
+            await syncToCloud(latestWorkspace.current)
+            setSaveState('saved')
+            setSaveError('')
+          } catch (caught) {
+            setSaveState('error')
+            setSaveError(caught instanceof Error ? caught.message : 'Cloud sync failed.')
+          }
+        }
+        return
+      }
+      try {
+        const remote = await fetchCloudWorkspace(client)
+        if (!remote || remote.revision <= cloudRevision.current) return
+        const nextWorkspace = await decryptCloudWorkspace(
+          cloudVault.userId,
+          cryptoKey,
+          remote.payload,
+        )
+        await replaceVault(nextWorkspace, cryptoKey, cloudVault.salt)
+        cloudRevision.current = remote.revision
+        skipNextSave.current = true
+        setWorkspaceState(nextWorkspace)
+        setActiveNoteId((current) =>
+          nextWorkspace.notes.some((note) => note.id === current)
+            ? current
+            : nextWorkspace.notes[0]?.id ?? null,
+        )
+        setSaveError('')
+      } catch (caught) {
+        setSaveState('error')
+        setSaveError(caught instanceof Error ? caught.message : 'Could not refresh the cloud vault.')
+      }
+    }
+    const interval = window.setInterval(() => void syncFromCloud(), 20_000)
+    return () => window.clearInterval(interval)
+  }, [cloudVault, cryptoKey, syncToCloud])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -294,6 +390,14 @@ export function WorkspaceApp({
 
   return (
     <main className={`workspace-shell ${railCollapsed ? 'rail-collapsed' : ''} ${mobileNoteOpen ? 'mobile-note-open' : ''}`}>
+      {sidebarOpen && (
+        <button
+          type="button"
+          className="mobile-sidebar-backdrop"
+          onClick={() => setSidebarOpen(false)}
+          aria-label="Close navigation"
+        />
+      )}
       <aside className={`workspace-rail ${sidebarOpen ? 'mobile-open' : ''}`}>
         <div className="rail-header">
           <Brand compact={railCollapsed} />
@@ -360,7 +464,13 @@ export function WorkspaceApp({
           {!railCollapsed && (
             <div className={`save-indicator ${saveState}`}>
               <span />
-              {saveState === 'saving' ? 'Saving locally…' : saveState === 'error' ? 'Save failed' : 'Encrypted & saved'}
+              {saveState === 'saving'
+                ? 'Saving locally…'
+                : saveState === 'syncing'
+                  ? 'Syncing securely…'
+                  : saveState === 'error'
+                    ? 'Sync needs attention'
+                    : cloudVault ? 'Encrypted & synced' : 'Encrypted & saved'}
             </div>
           )}
         </div>
@@ -625,9 +735,7 @@ export function WorkspaceApp({
       )}
       {syncOpen && (
         <SyncDialog
-          workspace={workspace}
-          cryptoKey={cryptoKey}
-          onCloudDownloaded={onCloudDownloaded}
+          onSignedOut={onLock}
           onClose={() => setSyncOpen(false)}
         />
       )}

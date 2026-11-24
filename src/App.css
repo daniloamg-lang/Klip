@@ -723,7 +723,8 @@ button {
 
 .rail-close,
 .mobile-menu,
-.mobile-back {
+.mobile-back,
+.mobile-sidebar-backdrop {
   display: none;
 }
 
@@ -1756,15 +1757,29 @@ kbd {
   .workspace-rail {
     position: fixed;
     z-index: 80;
-    top: 0;
-    bottom: 0;
-    left: 0;
+    top: env(safe-area-inset-top);
+    bottom: env(safe-area-inset-bottom);
+    left: env(safe-area-inset-left);
     width: min(284px, 85vw);
-    height: 100svh;
+    height: auto;
+    overflow-y: auto;
     padding: 17px 12px;
+    overscroll-behavior: contain;
     transform: translateX(-104%);
     transition: transform 180ms ease;
     box-shadow: var(--shadow);
+  }
+
+  .mobile-sidebar-backdrop {
+    position: fixed;
+    z-index: 70;
+    inset: env(safe-area-inset-top) env(safe-area-inset-right)
+      env(safe-area-inset-bottom) env(safe-area-inset-left);
+    display: block;
+    padding: 0;
+    border-radius: 0;
+    background: rgba(15, 13, 10, 0.48);
+    backdrop-filter: blur(2px);
   }
 
   .workspace-rail.mobile-open {
@@ -1901,9 +1916,16 @@ kbd {
 }
 
 :root[data-edge-to-edge] .workspace-rail,
-:root[data-edge-to-edge] .note-index,
-:root[data-edge-to-edge] .main-pane {
+:root[data-edge-to-edge] .note-index {
   height: calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+}
+
+:root[data-edge-to-edge] .main-pane {
+  top: env(safe-area-inset-top);
+  right: env(safe-area-inset-right);
+  bottom: env(safe-area-inset-bottom);
+  left: env(safe-area-inset-left);
+  height: auto;
 }
 
 :root[data-edge-to-edge] .command-backdrop,

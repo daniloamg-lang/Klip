@@ -176,6 +176,43 @@ export async function openCloudWorkspace(
   }
 }
 
+export async function decryptCloudWorkspace(
+  userId: string,
+  key: CryptoKey,
+  envelope: unknown,
+): Promise<Workspace> {
+  if (
+    typeof envelope !== 'object' ||
+    envelope === null ||
+    !('formatVersion' in envelope) ||
+    envelope.formatVersion !== 1 ||
+    !('iv' in envelope) ||
+    typeof envelope.iv !== 'string' ||
+    !('ciphertext' in envelope) ||
+    typeof envelope.ciphertext !== 'string'
+  ) {
+    throw new Error('The encrypted cloud workspace is invalid.')
+  }
+  const plaintext = await crypto.subtle.decrypt(
+    {
+      name: 'AES-GCM',
+      iv: base64ToBytes(envelope.iv),
+      additionalData: encoder.encode(`klip:${userId}:workspace:v1`),
+    },
+    key,
+    base64ToBytes(envelope.ciphertext),
+  )
+  const workspace = JSON.parse(decoder.decode(plaintext)) as Workspace
+  if (
+    workspace.formatVersion !== 1 ||
+    !Array.isArray(workspace.notes) ||
+    !Array.isArray(workspace.folders)
+  ) {
+    throw new Error('Unsupported workspace.')
+  }
+  return workspace
+}
+
 export async function replaceVault(
   workspace: Workspace,
   key: CryptoKey,
