@@ -32,7 +32,15 @@ import { SyncDialog } from './SyncDialog'
 import type { CloudVault } from './VaultScreen'
 import { fetchCloudWorkspace, saveCloudWorkspace } from '../lib/cloud-sync'
 import { supabase } from '../lib/supabase'
-import { incomingNotes, markdownWithWikiLinks, noteByTitle, outgoingNotes, renameWikiLinks } from '../lib/links'
+import {
+  incomingNotes,
+  markdownWithWikiLinks,
+  noteByTitle,
+  outgoingNotes,
+  renameWikiLinks,
+  toPageSyntax,
+  toUrlSyntax,
+} from '../lib/links'
 import { useTheme } from '../lib/theme'
 import { decryptCloudWorkspace, replaceVault, saveVault, sealWorkspace } from '../lib/vault'
 import { sortedNotes, uniqueTitle } from '../lib/workspace'
@@ -88,6 +96,11 @@ export function WorkspaceApp({
   } | null>(null)
   const [urlInput, setUrlInput] = useState('')
   const [editingLink, setEditingLink] = useState<{ kind: 'page' | 'url'; value: string } | null>(null)
+  const [selection, setSelection] = useState<{
+    start: number
+    end: number
+    label: string
+  } | null>(null)
   const [theme, toggleTheme] = useTheme()
   const saveSequence = useRef(0)
   const cloudRevision = useRef(cloudVault?.revision ?? 0)
@@ -161,6 +174,7 @@ export function WorkspaceApp({
   const backlinks = activeNote ? incomingNotes(activeNote, workspace.notes) : []
   const outgoing = activeNote ? outgoingNotes(activeNote, workspace.notes) : []
   const currentWikiQuery = activeNote ? wikiQuery(activeNote.content, cursorPosition) : null
+  const currentWikiLabel = activeNote ? wikiLinkLabel(activeNote.content, cursorPosition).trim() : ''
   const suggestions = activeNote && currentWikiQuery !== null
     ? workspace.notes.filter(
       (note) =>
@@ -395,7 +409,7 @@ export function WorkspaceApp({
 
   function handleEditorChange(content: string, cursor: number) {
     const before = content.slice(0, cursor)
-    const completed = before.match(/::([^:\n]+)::$/)
+    const completed = before.match(/([^\s:\n]+)::$/)
     const alreadyConfigured = completed && content.slice(cursor).startsWith('(')
     if (completed && !alreadyConfigured) {
       const start = cursor - completed[0].length
@@ -413,14 +427,14 @@ export function WorkspaceApp({
     event.preventDefault()
     if (!activeNote || !pendingUrl) return
     const url = normalizeUrl(urlInput)
-    const replacement = `::${pendingUrl.label}::(${url})`
+    const replacement = toUrlSyntax(pendingUrl.label, url)
     updateContent(
       activeNote.content.slice(0, pendingUrl.start) +
       replacement +
       activeNote.content.slice(pendingUrl.end),
     )
     setPendingUrl(null)
-    window.setTimeout(() => textareaRef.current?.focus(), 0)
+    setEditorMode('read')
   }
 
   function editRenderedLink(kind: 'page' | 'url', value: string) {
@@ -435,13 +449,13 @@ export function WorkspaceApp({
     if (editingLink.kind === 'url') {
       const [label, oldUrl] = editingLink.value.split('\u0000')
       const nextUrl = normalizeUrl(urlInput)
-      updateContent(activeNote.content.replace(
-        `::${label}::(${oldUrl})`,
-        `::${label}::(${nextUrl})`,
-      ))
+      const current = toUrlSyntax(label, oldUrl)
+      const legacy = `::${label}::(${oldUrl})`
+      const source = activeNote.content.includes(current) ? current : legacy
+      updateContent(activeNote.content.replace(source, toUrlSyntax(label, nextUrl)))
     } else {
       const [label, oldTarget] = editingLink.value.split('\u0000')
-      const replacement = `;;${label}|${urlInput.trim()};;`
+      const replacement = toPageSyntax(label, urlInput.trim())
       updateContent(replacePageLink(
         activeNote.content,
         label,
@@ -498,12 +512,12 @@ export function WorkspaceApp({
     const textarea = textareaRef.current
     if (!textarea || !activeNote) return
     const cursor = textarea.selectionStart
-    const doubleBracketOpen = activeNote.content.lastIndexOf('[[', cursor)
-    const semicolonOpen = activeNote.content.lastIndexOf(';;', cursor)
-    const open = Math.max(doubleBracketOpen, semicolonOpen)
-    const replacement = doubleBracketOpen > semicolonOpen
-      ? `[[${note.title}]]`
-      : `;;${note.title};;`
+    const trailing = activeNote.content.slice(0, cursor).match(/"([^"\n]+)";;$|([^\s;\n]+);;$/)
+    const legacyOpen = activeNote.content.lastIndexOf('[[', cursor)
+    if (!trailing && legacyOpen < 0) return
+    const label = trailing?.[1] ?? trailing?.[2] ?? activeNote.content.slice(legacyOpen + 2, cursor)
+    const open = trailing ? cursor - trailing[0].length : legacyOpen
+    const replacement = toPageSyntax(label, note.title)
     const content = `${activeNote.content.slice(0, open)}${replacement}${activeNote.content.slice(cursor)}`
     const nextCursor = open + replacement.length
     updateNote(activeNote.id, (current) => ({
@@ -511,10 +525,77 @@ export function WorkspaceApp({
       content,
       updatedAt: new Date().toISOString(),
     }))
-    window.setTimeout(() => {
-      textarea.focus()
-      textarea.setSelectionRange(nextCursor, nextCursor)
-    }, 0)
+    setCursorPosition(nextCursor)
+    setEditorMode('read')
+  }
+
+  function createWikiLink() {
+    const textarea = textareaRef.current
+    if (!textarea || !activeNote || currentWikiQuery === null) return
+    const title = wikiLinkLabel(activeNote.content, textarea.selectionStart).trim()
+    if (!title) return
+    const existing = noteByTitle(workspace.notes, title)
+    if (existing) {
+      insertWikiLink(existing)
+      return
+    }
+    const note = createNote(activeNote.folderId, uniqueTitle(title, workspace.notes.map((item) => item.title)))
+    const nextWorkspace = { ...workspace, notes: [...workspace.notes, note] }
+    setWorkspace(nextWorkspace)
+    insertWikiLinkIntoContent(note, textarea.selectionStart)
+  }
+
+  function insertWikiLinkIntoContent(note: Note, cursor: number) {
+    if (!activeNote) return
+    const trailing = activeNote.content.slice(0, cursor).match(/"([^"\n]+)";;$|([^\s;\n]+);;$/)
+    const legacyOpen = activeNote.content.lastIndexOf('[[', cursor)
+    if (!trailing && legacyOpen < 0) return
+    const label = trailing?.[1] ?? trailing?.[2] ?? activeNote.content.slice(legacyOpen + 2, cursor)
+    const open = trailing ? cursor - trailing[0].length : legacyOpen
+    const replacement = toPageSyntax(label, note.title)
+    updateNote(activeNote.id, (current) => ({
+      ...current,
+      content: `${current.content.slice(0, open)}${replacement}${current.content.slice(cursor)}`,
+      updatedAt: new Date().toISOString(),
+    }))
+    setCursorPosition(open + replacement.length)
+    setEditorMode('read')
+  }
+
+  function updateSelection(target: HTMLTextAreaElement) {
+    const start = target.selectionStart
+    const end = target.selectionEnd
+    if (start === end) {
+      setSelection(null)
+      return
+    }
+    const label = target.value.slice(start, end)
+    setSelection({ start, end, label })
+  }
+
+  function createPageLinkFromSelection() {
+    if (!selection || !activeNote) return
+    const replacement = selection.label.includes(' ')
+      ? `"${selection.label.trim()}";;`
+      : `${selection.label.trim()};;`
+    const content = activeNote.content.slice(0, selection.start) +
+      replacement +
+      activeNote.content.slice(selection.end)
+    updateContent(content)
+    setCursorPosition(selection.start + replacement.length)
+    setSelection(null)
+    setEditorMode('read')
+  }
+
+  function createUrlLinkFromSelection() {
+    if (!selection) return
+    setPendingUrl({
+      label: selection.label,
+      start: selection.start,
+      end: selection.end,
+    })
+    setUrlInput('')
+    setSelection(null)
   }
 
   function moveNote(event: ChangeEvent<HTMLSelectElement>) {
@@ -760,8 +841,15 @@ export function WorkspaceApp({
                         setCursorPosition(event.target.selectionStart)
                         handleEditorChange(event.target.value, event.target.selectionStart)
                       }}
-                      onClick={(event) => setCursorPosition(event.currentTarget.selectionStart)}
-                      onKeyUp={(event) => setCursorPosition(event.currentTarget.selectionStart)}
+                      onSelect={(event) => updateSelection(event.currentTarget)}
+                      onClick={(event) => {
+                        setCursorPosition(event.currentTarget.selectionStart)
+                        updateSelection(event.currentTarget)
+                      }}
+                      onKeyUp={(event) => {
+                        setCursorPosition(event.currentTarget.selectionStart)
+                        updateSelection(event.currentTarget)
+                      }}
                       onKeyDown={(event) => {
                         if (event.key === 'Tab') {
                           event.preventDefault()
@@ -773,10 +861,20 @@ export function WorkspaceApp({
                           window.setTimeout(() => target.setSelectionRange(start + 2, start + 2), 0)
                         }
                       }}
-                      placeholder={'Start writing…\n\nUse ;;Page title;; to link a page.\nUse ::Label:: to add a URL.\nMarkdown is supported.'}
+                      placeholder={'Start writing…\n\nType a page name followed by ;;\nType a label followed by :: to add a URL.\nMarkdown is supported.'}
                       spellCheck
                     />
-                    {currentWikiQuery !== null && suggestions.length > 0 && (
+                    {selection && (
+                      <div className="selection-toolbox" role="toolbar" aria-label="Add link">
+                        <button type="button" onClick={createPageLinkFromSelection}>
+                          <FileText size={14} /> Link page
+                        </button>
+                        <button type="button" onClick={createUrlLinkFromSelection}>
+                          <Link2 size={14} /> Link URL
+                        </button>
+                      </div>
+                    )}
+                    {currentWikiQuery !== null && (
                       <div className="wiki-suggestions">
                         <span>Link to a note</span>
                         {suggestions.map((note) => (
@@ -785,6 +883,14 @@ export function WorkspaceApp({
                             {note.title}
                           </button>
                         ))}
+                        {!suggestions.some((note) =>
+                          note.title.toLocaleLowerCase() === currentWikiQuery.toLocaleLowerCase()
+                        ) && currentWikiLabel && (
+                          <button type="button" onClick={createWikiLink}>
+                            <Plus size={14} />
+                            Create “{currentWikiLabel}”
+                          </button>
+                        )}
                       </div>
                     )}
                   </>
@@ -961,15 +1067,19 @@ function relativeDate(value: string) {
 }
 
 function wikiQuery(content: string, cursor: number): string | null {
+  const trailing = wikiLinkLabel(content, cursor)
+  if (trailing) return trailing.toLocaleLowerCase()
   const before = content.slice(0, cursor)
-  const doubleBracketOpen = before.lastIndexOf('[[')
-  const semicolonOpen = before.lastIndexOf(';;', cursor)
-  const open = Math.max(doubleBracketOpen, semicolonOpen)
-  if (open < 0) return null
-  const closing = open === doubleBracketOpen ? ']]' : ';;'
-  const query = before.slice(open + 2)
-  if (query.includes(closing)) return null
+  const legacyOpen = before.lastIndexOf('[[')
+  if (legacyOpen < 0) return null
+  const query = before.slice(legacyOpen + 2)
+  if (query.includes(']]')) return null
   return query.toLocaleLowerCase()
+}
+
+function wikiLinkLabel(content: string, cursor: number): string {
+  const trailing = content.slice(0, cursor).match(/"([^"\n]+)";;$|([^\s;\n]+);;$/)
+  return trailing ? (trailing[1] ?? trailing[2]) : ''
 }
 
 function normalizeUrl(value: string): string {
@@ -984,6 +1094,8 @@ function replacePageLink(
   replacement: string,
 ): string {
   const candidates = [
+    toPageSyntax(label, oldTarget),
+    toPageSyntax(oldTarget),
     `;;${label}|${oldTarget};;`,
     `;;${oldTarget};;`,
     `[[${oldTarget}|${label}]]`,

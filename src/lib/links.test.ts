@@ -49,17 +49,23 @@ describe('wiki links', () => {
     )
   })
 
-  it('supports semicolon page links and URL links', () => {
-    const content = 'Open ;;Beta;; or ::Wikipedia::(https://wikipedia.org).'
+  it('supports trailing page links and URL links without exposing URL text', () => {
+    const content = 'Open Beta;; or Wikipedia::(https://wikipedia.org).'
     expect(linksFromContent(content)).toContainEqual({ targetTitle: 'Beta', label: 'Beta' })
     expect(markdownWithWikiLinks(content)).toBe(
       'Open [Beta](#note=Beta) or [Wikipedia](https://wikipedia.org).',
     )
   })
 
-  it('renames semicolon page links while preserving aliases', () => {
-    expect(renameWikiLinks('See ;;the notes|Old;;.', 'Old', 'New')).toBe(
-      'See ;;the notes|New;;.',
+  it('renames trailing page links while preserving aliases', () => {
+    expect(renameWikiLinks('See "the notes";;(Old).', 'Old', 'New')).toBe(
+      'See "the notes";;(New).',
+    )
+  })
+
+  it('keeps legacy link syntax working', () => {
+    expect(markdownWithWikiLinks('Open ;;Beta;; and ::Wikipedia::(https://wikipedia.org).')).toBe(
+      'Open [Beta](#note=Beta) and [Wikipedia](https://wikipedia.org).',
     )
   })
 })

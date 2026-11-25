@@ -1407,6 +1407,38 @@ kbd {
   background: var(--surface-2);
 }
 
+.selection-toolbox {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  z-index: 2;
+  display: flex;
+  gap: 4px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  transform: translateX(-50%);
+}
+
+.selection-toolbox button {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 9px;
+  border-radius: 6px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 11px;
+}
+
+.selection-toolbox button:hover {
+  color: var(--ink);
+  background: var(--surface-2);
+}
+
 .markdown-preview {
   min-height: 430px;
   color: var(--ink);
@@ -1452,16 +1484,20 @@ kbd {
 
 .markdown-preview a,
 .wiki-link {
-  color: var(--accent-ink);
+  color: var(--accent);
   background: transparent;
-  text-decoration-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--accent) 58%, transparent);
   text-underline-offset: 3px;
 }
 
 .wiki-link {
   display: inline;
+  border: 0;
+  font: inherit;
   padding: 1px 3px;
   border-radius: 4px;
+  cursor: pointer;
   background: var(--accent-soft);
 }
 
