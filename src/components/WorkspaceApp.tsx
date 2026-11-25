@@ -331,7 +331,9 @@ export function WorkspaceApp({
     ? workspace.notes.filter(
       (note) =>
         note.id !== activeNote.id &&
-        note.title.toLocaleLowerCase().includes(effectiveWikiQuery),
+        `${note.title}\n${folderPath(note.folderId, workspace.folders)}`
+          .toLocaleLowerCase()
+          .includes(effectiveWikiQuery),
     ).slice(0, 6)
     : []
 
@@ -1008,7 +1010,7 @@ export function WorkspaceApp({
               <span className="note-list-copy">
                 <strong>{note.title || 'Untitled note'}</strong>
                 <span>{notePreview(note.content)}</span>
-                <small>{relativeDate(note.updatedAt)}</small>
+                <small>{wordCount(note.content)} words · {relativeDate(note.updatedAt)}</small>
               </span>
             </button>
           ))}
@@ -1111,7 +1113,7 @@ export function WorkspaceApp({
                 placeholder="Untitled note"
               />
               <div className="note-metadata">
-                <span>Edited {relativeDate(activeNote.updatedAt)}</span>
+                <span>{wordCount(activeNote.content)} words · Edited {relativeDate(activeNote.updatedAt)}</span>
                 <label>
                   <FolderOpen size={14} />
                   <select value={activeNote.folderId ?? ''} onChange={moveNote} aria-label="Move note to folder">
@@ -1189,9 +1191,16 @@ export function WorkspaceApp({
                           />
                         </label>
                         {suggestions.map((note) => (
-                          <button key={note.id} onClick={() => insertWikiLink(note)}>
+                          <button
+                            key={note.id}
+                            className="wiki-page-result"
+                            onClick={() => insertWikiLink(note)}
+                          >
                             <FileText size={14} />
-                            {note.title}
+                            <span>
+                              <strong>{note.title}</strong>
+                              <small>{folderPath(note.folderId, workspace.folders)}</small>
+                            </span>
                           </button>
                         ))}
                         {!suggestions.some((note) =>
@@ -1378,6 +1387,34 @@ export function WorkspaceApp({
 
 function notePreview(content: string) {
   return content.replace(/[#*`>[\]]/g, '').replace(/\s+/g, ' ').trim() || 'No content yet'
+}
+
+function wordCount(content: string): number {
+  const plainText = content
+    .replace(/(?:\"([^\"\n]+)\"|[^\s:;\n]+)::\([^)]+\)/g, '$1')
+    .replace(/(?:\"([^\"\n]+)\"|[^\s;\n]+);;(?:\([^)]+\))?/g, '$1')
+    .replace(/::([^:\n]+)::\([^)]+\)/g, '$1')
+    .replace(/;;([^;|\n]+)(?:\|[^;\n]+)?;;/g, '$1')
+    .replace(/\[\[([^\]|\n]+)(?:\|([^\]]+))?\]\]/g, (_match, target: string, label?: string) =>
+      label ?? target
+    )
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/[#*_`~>[\]()]/g, ' ')
+  return plainText.trim().match(/[\p{L}\p{N}]+(?:[’'-][\p{L}\p{N}]+)*/gu)?.length ?? 0
+}
+
+function folderPath(folderId: string | null, folders: Folder[]): string {
+  const names: string[] = []
+  const visited = new Set<string>()
+  let currentId = folderId
+  while (currentId && !visited.has(currentId)) {
+    visited.add(currentId)
+    const folder = folders.find((item) => item.id === currentId)
+    if (!folder) break
+    names.unshift(folder.name)
+    currentId = folder.parentId
+  }
+  return names.length ? names.join(' / ') : 'All notes'
 }
 
 type EditorFormat =

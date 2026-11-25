@@ -1522,6 +1522,29 @@ kbd {
   background: var(--surface-2);
 }
 
+.wiki-page-result > span {
+  display: grid;
+  min-width: 0;
+}
+
+.wiki-page-result strong,
+.wiki-page-result small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wiki-page-result strong {
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.wiki-page-result small {
+  color: var(--faint);
+  font-size: 9px;
+}
+
 .selection-toolbox {
   position: absolute;
   top: 10px;
