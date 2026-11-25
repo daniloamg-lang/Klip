@@ -1,16 +1,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type SetStateAction } from 'react'
 import ReactMarkdown from 'react-markdown'
+import { renderToStaticMarkup } from 'react-dom/server'
 import remarkGfm from 'remark-gfm'
+import rehypeRaw from 'rehype-raw'
+import rehypeSanitize, { defaultSchema } from 'rehype-sanitize'
 import {
   ArrowLeft,
+  Bold,
   ChevronDown,
+  Code2,
   Cloud,
   CloudOff,
   Eye,
   FileText,
   FolderOpen,
+  Heading,
   History,
+  Italic,
   Link2,
+  List,
+  ListOrdered,
   LockKeyhole,
   Menu,
   Moon,
@@ -18,9 +27,13 @@ import {
   PanelLeftClose,
   Pencil,
   Plus,
+  Quote,
   Search,
+  Strikethrough,
   Sun,
   Trash2,
+  Underline,
+  Undo2,
   X,
 } from 'lucide-react'
 import { Brand } from './Brand'
@@ -37,6 +50,8 @@ import {
   markdownWithWikiLinks,
   noteByTitle,
   outgoingNotes,
+  renderedLinkSourceRange,
+  replaceRenderedLinkLabel,
   renameWikiLinks,
   toPageSyntax,
   toUrlSyntax,
@@ -64,6 +79,128 @@ interface WorkspaceAppProps {
 
 type MainView = 'note' | 'graph'
 type EditorMode = 'write' | 'read'
+const markdownSanitizeSchema = {
+  ...defaultSchema,
+  tagNames: [...(defaultSchema.tagNames ?? []), 'u'],
+}
+
+interface RichTextEditorProps {
+  className: string
+  content: string
+  editorRef: React.RefObject<HTMLDivElement | null>
+  onChange: (content: string, cursor: number, textBeforeCaret: string) => void
+  onUndo: () => void
+  onLinkOpen: (kind: 'page' | 'url', value: string) => void
+  onLinkEdit: (kind: 'page' | 'url', value: string) => void
+  onSelection: (start: number, end: number, label: string) => void
+}
+
+function RichTextEditor({
+  className,
+  content,
+  editorRef,
+  onChange,
+  onUndo,
+  onLinkOpen,
+  onLinkEdit,
+  onSelection,
+}: RichTextEditorProps) {
+  const lastInput = useRef<string | null>(null)
+  const renderedHtml = renderToStaticMarkup(
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      rehypePlugins={[rehypeRaw, [rehypeSanitize, markdownSanitizeSchema]]}
+      components={{
+        a: ({ href, children }) => (
+          <a
+            href={href}
+            className={href?.startsWith('#note=') ? 'wiki-link' : undefined}
+            data-link-kind={href?.startsWith('#note=') ? 'page' : 'url'}
+            data-link-destination={href?.startsWith('#note=') ? decodeURIComponent(href.slice(6)) : href}
+          >
+            {children}
+          </a>
+        ),
+      }}
+    >
+      {markdownWithWikiLinks(content)}
+    </ReactMarkdown>,
+  )
+
+  useEffect(() => {
+    const editor = editorRef.current
+    if (!editor || lastInput.current === content) return
+    editor.innerHTML = renderedHtml
+    lastInput.current = content
+  }, [content, editorRef, renderedHtml])
+
+  function emitChange(editor: HTMLDivElement) {
+    const next = editableHtmlToMarkdown(editor)
+    lastInput.current = next
+    onChange(next, getCaretTextOffset(editor), getTextBeforeCaret(editor))
+  }
+
+  function linkDetails(element: EventTarget | null): { kind: 'page' | 'url'; value: string } | null {
+    const anchor = element instanceof Element ? element.closest<HTMLAnchorElement>('a[data-link-kind]') : null
+    if (!anchor) return null
+    const kind = anchor.dataset.linkKind === 'page' ? 'page' : 'url'
+    const destination = anchor.dataset.linkDestination ?? anchor.href
+    return { kind, value: `${anchor.textContent ?? ''}\u0000${destination}` }
+  }
+
+  return (
+    <div
+      ref={editorRef}
+      className={className}
+      contentEditable
+      suppressContentEditableWarning
+      data-rich-editor
+      role="textbox"
+      aria-multiline="true"
+      spellCheck
+      onInput={(event) => emitChange(event.currentTarget)}
+      onMouseUp={(event) => reportSelection(event.currentTarget)}
+      onKeyUp={(event) => reportSelection(event.currentTarget)}
+      onClick={(event) => {
+        const link = linkDetails(event.target)
+        if (link) event.preventDefault()
+      }}
+      onDoubleClick={(event) => {
+        const link = linkDetails(event.target)
+        if (!link) return
+        event.preventDefault()
+        onLinkOpen(link.kind, link.value)
+      }}
+      onContextMenu={(event) => {
+        const link = linkDetails(event.target)
+        if (!link) return
+        event.preventDefault()
+        onLinkEdit(link.kind, link.value)
+      }}
+      onKeyDown={(event) => {
+        if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === 'z') {
+          event.preventDefault()
+          onUndo()
+        }
+      }}
+      onPaste={(event) => {
+        event.preventDefault()
+        document.execCommand('insertText', false, event.clipboardData.getData('text/plain'))
+      }}
+    />
+  )
+
+  function reportSelection(editor: HTMLDivElement) {
+    const selected = window.getSelection()
+    const label = selected?.toString() ?? ''
+    if (!label || selected?.isCollapsed) {
+      onSelection(0, 0, '')
+      return
+    }
+    const end = getCaretTextOffset(editor)
+    onSelection(Math.max(0, end - label.length), end, label)
+  }
+}
 
 export function WorkspaceApp({
   initialWorkspace,
@@ -73,6 +210,7 @@ export function WorkspaceApp({
 }: WorkspaceAppProps) {
   const [workspace, setWorkspaceState] = useState(initialWorkspace)
   const [activeNoteId, setActiveNoteId] = useState<string | null>(initialWorkspace.notes[0]?.id ?? null)
+  const [noteNavigationHistory, setNoteNavigationHistory] = useState<string[]>([])
   const [selectedFolderId, setSelectedFolderId] = useState<string | null | undefined>(undefined)
   const [expandedIds, setExpandedIds] = useState(new Set<string>())
   const [search, setSearch] = useState('')
@@ -94,6 +232,13 @@ export function WorkspaceApp({
     start: number
     end: number
   } | null>(null)
+  const [undoStacks, setUndoStacks] = useState<Record<string, string[]>>({})
+  const [editingLabel, setEditingLabel] = useState<{
+    kind: 'page' | 'url'
+    label: string
+    originalLabel: string
+    destination: string
+  } | null>(null)
   const [urlInput, setUrlInput] = useState('')
   const [editingLink, setEditingLink] = useState<{ kind: 'page' | 'url'; value: string } | null>(null)
   const [selection, setSelection] = useState<{
@@ -101,6 +246,7 @@ export function WorkspaceApp({
     end: number
     label: string
   } | null>(null)
+  const [pageSearch, setPageSearch] = useState('')
   const [theme, toggleTheme] = useTheme()
   const saveSequence = useRef(0)
   const cloudRevision = useRef(cloudVault?.revision ?? 0)
@@ -110,7 +256,8 @@ export function WorkspaceApp({
   const syncQueued = useRef(false)
   const localSaveDirty = useRef(false)
   const skipNextSave = useRef(false)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const richEditorRef = useRef<HTMLDivElement>(null)
+  const linkClickTimer = useRef<number | null>(null)
 
   useAppBackNavigation({
     onBack: () => {
@@ -146,6 +293,10 @@ export function WorkspaceApp({
         setMainView('note')
         return true
       }
+      if (noteNavigationHistory.length > 0) {
+        navigateBackToPreviousNote()
+        return true
+      }
       if (mobileNoteOpen) {
         setMobileNoteOpen(false)
         return true
@@ -175,13 +326,18 @@ export function WorkspaceApp({
   const outgoing = activeNote ? outgoingNotes(activeNote, workspace.notes) : []
   const currentWikiQuery = activeNote ? wikiQuery(activeNote.content, cursorPosition) : null
   const currentWikiLabel = activeNote ? wikiLinkLabel(activeNote.content, cursorPosition).trim() : ''
+  const effectiveWikiQuery = pageSearch.trim().toLocaleLowerCase()
   const suggestions = activeNote && currentWikiQuery !== null
     ? workspace.notes.filter(
       (note) =>
         note.id !== activeNote.id &&
-        note.title.toLocaleLowerCase().includes(currentWikiQuery),
+        note.title.toLocaleLowerCase().includes(effectiveWikiQuery),
     ).slice(0, 6)
     : []
+
+  useEffect(() => {
+    if (currentWikiQuery !== null) setPageSearch(currentWikiLabel)
+  }, [currentWikiLabel, currentWikiQuery])
 
   useEffect(() => {
     latestWorkspace.current = workspace
@@ -319,6 +475,21 @@ export function WorkspaceApp({
     }))
   }
 
+  function undoContentChange() {
+    if (!activeNote) return
+    const previous = undoStacks[activeNote.id]?.at(-1)
+    if (previous === undefined) return
+    updateNote(activeNote.id, (note) => ({
+      ...withRevision(note),
+      content: previous,
+      updatedAt: new Date().toISOString(),
+    }))
+    setUndoStacks((current) => ({
+      ...current,
+      [activeNote.id]: (current[activeNote.id] ?? []).slice(0, -1),
+    }))
+  }
+
   function addNote() {
     const note = createNote(
       selectedFolderId === undefined ? null : selectedFolderId,
@@ -330,7 +501,7 @@ export function WorkspaceApp({
     setEditorMode('write')
     setSidebarOpen(false)
     setMobileNoteOpen(true)
-    window.setTimeout(() => textareaRef.current?.focus(), 0)
+    window.setTimeout(() => richEditorRef.current?.focus(), 0)
   }
 
   function updateTitle(title: string) {
@@ -388,18 +559,37 @@ export function WorkspaceApp({
     if (selectedFolderId === folder.id) setSelectedFolderId(folder.parentId)
   }
 
-  function openNote(id: string) {
+  function openNote(id: string, recordNavigation = false) {
+    if (recordNavigation && activeNoteId && id !== activeNoteId) {
+      setNoteNavigationHistory((current) => [...current, activeNoteId].slice(-30))
+    }
     setActiveNoteId(id)
     setMainView('note')
     setEditorMode('write')
     setSidebarOpen(false)
     setMobileNoteOpen(true)
     setHistoryOpen(false)
-    window.setTimeout(() => textareaRef.current?.focus(), 0)
+    window.setTimeout(() => richEditorRef.current?.focus(), 0)
+  }
+
+  function navigateBackToPreviousNote() {
+    const previousId = noteNavigationHistory.at(-1)
+    if (!previousId) return
+    setNoteNavigationHistory((current) => current.slice(0, -1))
+    setActiveNoteId(previousId)
+    setMainView('note')
+    setEditorMode('write')
+    setMobileNoteOpen(true)
+    setHistoryOpen(false)
+    window.setTimeout(() => richEditorRef.current?.focus(), 0)
   }
 
   function updateContent(content: string) {
     if (!activeNote || content === activeNote.content) return
+    setUndoStacks((current) => ({
+      ...current,
+      [activeNote.id]: [...(current[activeNote.id] ?? []), activeNote.content].slice(-20),
+    }))
     updateNote(activeNote.id, (note) => ({
       ...withRevision(note),
       content,
@@ -407,16 +597,19 @@ export function WorkspaceApp({
     }))
   }
 
-  function handleEditorChange(content: string, cursor: number) {
-    const before = content.slice(0, cursor)
-    const completed = before.match(/([^\s:\n]+)::$/)
-    const alreadyConfigured = completed && content.slice(cursor).startsWith('(')
+  function handleEditorChange(content: string, cursor: number, textBeforeCaret: string) {
+    const completed = textBeforeCaret.match(/([^\s:\n]+)::$/)
+    const pageCompleted = textBeforeCaret.match(/"([^"\n]+)";;$|([^\s;\n]+);;$/)
+    const marker = completed?.[0] ?? pageCompleted?.[0]
+    const sourceCursor = marker ? content.lastIndexOf(marker) + marker.length : cursor
+    setCursorPosition(sourceCursor)
+    const alreadyConfigured = completed && content.slice(sourceCursor).startsWith('(')
     if (completed && !alreadyConfigured) {
-      const start = cursor - completed[0].length
+      const start = sourceCursor - completed[0].length
       setPendingUrl({
         label: completed[1].trim(),
         start,
-        end: cursor,
+        end: sourceCursor,
       })
       setUrlInput('')
     }
@@ -434,13 +627,100 @@ export function WorkspaceApp({
       activeNote.content.slice(pendingUrl.end),
     )
     setPendingUrl(null)
-    setEditorMode('read')
+    setEditorMode('write')
   }
 
   function editRenderedLink(kind: 'page' | 'url', value: string) {
     setEditingLink({ kind, value })
     const [, current] = value.split('\u0000')
     setUrlInput(current ?? '')
+  }
+
+  function editRenderedLinkLabel(kind: 'page' | 'url', value: string) {
+    if (!activeNote) return
+    const [label, destination] = value.split('\u0000')
+    setEditingLabel({ kind, label, originalLabel: label, destination })
+  }
+
+  function continueAfterRenderedLink(kind: 'page' | 'url', value: string) {
+    if (!activeNote) return
+    const [label, destination] = value.split('\u0000')
+    const range = renderedLinkSourceRange(activeNote.content, kind, label, destination)
+    if (!range) return
+    const insertAt = range.end
+    const needsSpace = insertAt > 0 && !/[\s.,!?;:)\]}]/.test(activeNote.content[insertAt] ?? '')
+      ? true
+      : false
+    const content = needsSpace
+      ? `${activeNote.content.slice(0, insertAt)} ${activeNote.content.slice(insertAt)}`
+      : activeNote.content
+    if (content !== activeNote.content) updateContent(content)
+    const nextCursor = insertAt + (needsSpace ? 1 : 0)
+    setEditorMode('write')
+    setCursorPosition(nextCursor)
+    window.setTimeout(() => {
+      placeCaretAtTextOffset(richEditorRef.current, nextCursor)
+    }, 0)
+  }
+
+  function saveRenderedLabel(event: React.FormEvent) {
+    event.preventDefault()
+    if (!activeNote || !editingLabel) return
+    updateContent(replaceRenderedLinkLabel(
+      activeNote.content,
+      editingLabel.kind,
+      editingLabel.originalLabel,
+      editingLabel.destination,
+      editingLabel.label,
+    ))
+    setEditingLabel(null)
+  }
+
+  function followRenderedLink(kind: 'page' | 'url', destination: string) {
+    if (kind === 'page') {
+      navigateWikiLink(destination)
+      return
+    }
+    window.open(destination, '_blank', 'noopener,noreferrer')
+  }
+
+  function handleRenderedLinkClick(
+    event: React.MouseEvent<HTMLElement>,
+    kind: 'page' | 'url',
+    value: string,
+  ) {
+    event.preventDefault()
+    if (event.currentTarget.dataset.longPressed === 'true') {
+      event.currentTarget.dataset.longPressed = 'false'
+      return
+    }
+    if (linkClickTimer.current !== null) window.clearTimeout(linkClickTimer.current)
+    linkClickTimer.current = window.setTimeout(() => {
+      linkClickTimer.current = null
+      continueAfterRenderedLink(kind, value)
+    }, 250)
+  }
+
+  function handleRenderedLinkDoubleClick(
+    event: React.MouseEvent<HTMLElement>,
+    kind: 'page' | 'url',
+    destination: string,
+  ) {
+    event.preventDefault()
+    if (linkClickTimer.current !== null) {
+      window.clearTimeout(linkClickTimer.current)
+      linkClickTimer.current = null
+    }
+    followRenderedLink(kind, destination)
+  }
+
+  function handleRenderedLinkContextMenu(
+    event: React.MouseEvent<HTMLElement>,
+    kind: 'page' | 'url',
+    value: string,
+  ) {
+    event.preventDefault()
+    editRenderedLinkLabel(kind, value)
   }
 
   function saveRenderedLink(event: React.FormEvent) {
@@ -494,7 +774,7 @@ export function WorkspaceApp({
   function navigateWikiLink(targetTitle: string) {
     const target = noteByTitle(workspace.notes, targetTitle)
     if (target) {
-      openNote(target.id)
+      openNote(target.id, true)
       return
     }
     const note = createNote(
@@ -502,6 +782,7 @@ export function WorkspaceApp({
       uniqueTitle(targetTitle, workspace.notes.map((item) => item.title)),
     )
     setWorkspace((current) => ({ ...current, notes: [...current.notes, note] }))
+    if (activeNoteId) setNoteNavigationHistory((current) => [...current, activeNoteId].slice(-30))
     setActiveNoteId(note.id)
     setMainView('note')
     setEditorMode('write')
@@ -509,9 +790,8 @@ export function WorkspaceApp({
   }
 
   function insertWikiLink(note: Note) {
-    const textarea = textareaRef.current
-    if (!textarea || !activeNote) return
-    const cursor = textarea.selectionStart
+    if (!activeNote) return
+    const cursor = cursorPosition
     const trailing = activeNote.content.slice(0, cursor).match(/"([^"\n]+)";;$|([^\s;\n]+);;$/)
     const legacyOpen = activeNote.content.lastIndexOf('[[', cursor)
     if (!trailing && legacyOpen < 0) return
@@ -520,19 +800,15 @@ export function WorkspaceApp({
     const replacement = toPageSyntax(label, note.title)
     const content = `${activeNote.content.slice(0, open)}${replacement}${activeNote.content.slice(cursor)}`
     const nextCursor = open + replacement.length
-    updateNote(activeNote.id, (current) => ({
-      ...current,
-      content,
-      updatedAt: new Date().toISOString(),
-    }))
+    updateContent(content)
     setCursorPosition(nextCursor)
-    setEditorMode('read')
+    setEditorMode('write')
+    setPageSearch('')
   }
 
   function createWikiLink() {
-    const textarea = textareaRef.current
-    if (!textarea || !activeNote || currentWikiQuery === null) return
-    const title = wikiLinkLabel(activeNote.content, textarea.selectionStart).trim()
+    if (!activeNote || currentWikiQuery === null) return
+    const title = pageSearch.trim() || wikiLinkLabel(activeNote.content, cursorPosition).trim()
     if (!title) return
     const existing = noteByTitle(workspace.notes, title)
     if (existing) {
@@ -542,7 +818,8 @@ export function WorkspaceApp({
     const note = createNote(activeNote.folderId, uniqueTitle(title, workspace.notes.map((item) => item.title)))
     const nextWorkspace = { ...workspace, notes: [...workspace.notes, note] }
     setWorkspace(nextWorkspace)
-    insertWikiLinkIntoContent(note, textarea.selectionStart)
+    insertWikiLinkIntoContent(note, cursorPosition)
+    setPageSearch('')
   }
 
   function insertWikiLinkIntoContent(note: Note, cursor: number) {
@@ -553,24 +830,29 @@ export function WorkspaceApp({
     const label = trailing?.[1] ?? trailing?.[2] ?? activeNote.content.slice(legacyOpen + 2, cursor)
     const open = trailing ? cursor - trailing[0].length : legacyOpen
     const replacement = toPageSyntax(label, note.title)
-    updateNote(activeNote.id, (current) => ({
-      ...current,
-      content: `${current.content.slice(0, open)}${replacement}${current.content.slice(cursor)}`,
-      updatedAt: new Date().toISOString(),
-    }))
+    updateContent(`${activeNote.content.slice(0, open)}${replacement}${activeNote.content.slice(cursor)}`)
     setCursorPosition(open + replacement.length)
-    setEditorMode('read')
+    setEditorMode('write')
+    setPageSearch('')
   }
 
-  function updateSelection(target: HTMLTextAreaElement) {
-    const start = target.selectionStart
-    const end = target.selectionEnd
-    if (start === end) {
-      setSelection(null)
-      return
-    }
-    const label = target.value.slice(start, end)
-    setSelection({ start, end, label })
+  function applyEditorFormat(format: EditorFormat) {
+    const editor = richEditorRef.current
+    if (!editor) return
+    editor.focus()
+    const command = {
+      bold: ['bold'],
+      italic: ['italic'],
+      underline: ['underline'],
+      strike: ['strikeThrough'],
+      heading: ['formatBlock', 'h2'],
+      bullet: ['insertUnorderedList'],
+      number: ['insertOrderedList'],
+      quote: ['formatBlock', 'blockquote'],
+      code: ['formatBlock', 'pre'],
+    }[format]
+    document.execCommand(command[0], false, command[1])
+    editor.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'formatSetBlockTextDirection' }))
   }
 
   function createPageLinkFromSelection() {
@@ -584,7 +866,7 @@ export function WorkspaceApp({
     updateContent(content)
     setCursorPosition(selection.start + replacement.length)
     setSelection(null)
-    setEditorMode('read')
+    setEditorMode('write')
   }
 
   function createUrlLinkFromSelection() {
@@ -773,6 +1055,18 @@ export function WorkspaceApp({
                 <ArrowLeft size={20} />
               </button>
               <div className="breadcrumb">
+                {noteNavigationHistory.length > 0 && (
+                  <button
+                    type="button"
+                    className="linked-note-back"
+                    onClick={navigateBackToPreviousNote}
+                    title="Back to previous page"
+                    aria-label="Back to previous page"
+                  >
+                    <ArrowLeft size={14} />
+                    <span>Back</span>
+                  </button>
+                )}
                 <FolderOpen size={15} />
                 <span>{workspace.folders.find((folder) => folder.id === activeNote.folderId)?.name ?? 'All notes'}</span>
               </div>
@@ -790,6 +1084,15 @@ export function WorkspaceApp({
                   setMainView('graph')
                 }} title="Open local graph">
                   <Network size={17} />
+                </button>
+                <button
+                  className="icon-button"
+                  onClick={undoContentChange}
+                  title="Undo (20 steps)"
+                  aria-label="Undo"
+                  disabled={!activeNote || !(undoStacks[activeNote.id]?.length)}
+                >
+                  <Undo2 size={17} />
                 </button>
                 <button className="icon-button" onClick={() => setHistoryOpen(true)} title="Version history">
                   <History size={17} />
@@ -833,36 +1136,34 @@ export function WorkspaceApp({
               <div className="editor-wrap">
                 {editorMode === 'write' ? (
                   <>
-                    <textarea
-                      ref={textareaRef}
+                    <div className="editor-toolbar" role="toolbar" aria-label="Text formatting">
+                      <button type="button" title="Bold" onMouseDown={(event) => event.preventDefault()} onClick={() => applyEditorFormat('bold')}><Bold size={15} /></button>
+                      <button type="button" title="Italic" onMouseDown={(event) => event.preventDefault()} onClick={() => applyEditorFormat('italic')}><Italic size={15} /></button>
+                      <button type="button" title="Underline" onMouseDown={(event) => event.preventDefault()} onClick={() => applyEditorFormat('underline')}><Underline size={15} /></button>
+                      <button type="button" title="Strikethrough" onMouseDown={(event) => event.preventDefault()} onClick={() => applyEditorFormat('strike')}><Strikethrough size={15} /></button>
+                      <span />
+                      <button type="button" title="Heading" onMouseDown={(event) => event.preventDefault()} onClick={() => applyEditorFormat('heading')}><Heading size={15} /></button>
+                      <button type="button" title="Bulleted list" onMouseDown={(event) => event.preventDefault()} onClick={() => applyEditorFormat('bullet')}><List size={15} /></button>
+                      <button type="button" title="Numbered list" onMouseDown={(event) => event.preventDefault()} onClick={() => applyEditorFormat('number')}><ListOrdered size={15} /></button>
+                      <button type="button" title="Quote" onMouseDown={(event) => event.preventDefault()} onClick={() => applyEditorFormat('quote')}><Quote size={15} /></button>
+                      <button type="button" title="Code" onMouseDown={(event) => event.preventDefault()} onClick={() => applyEditorFormat('code')}><Code2 size={15} /></button>
+                    </div>
+                    <RichTextEditor
+                      editorRef={richEditorRef}
                       className="note-editor"
-                      value={activeNote.content}
-                      onChange={(event) => {
-                        setCursorPosition(event.target.selectionStart)
-                        handleEditorChange(event.target.value, event.target.selectionStart)
+                      content={activeNote.content}
+                      onChange={(content, cursor, textBeforeCaret) => {
+                        handleEditorChange(content, cursor, textBeforeCaret)
                       }}
-                      onSelect={(event) => updateSelection(event.currentTarget)}
-                      onClick={(event) => {
-                        setCursorPosition(event.currentTarget.selectionStart)
-                        updateSelection(event.currentTarget)
+                      onUndo={undoContentChange}
+                      onLinkOpen={(kind, value) => {
+                        const [, destination] = value.split('\u0000')
+                        followRenderedLink(kind, destination)
                       }}
-                      onKeyUp={(event) => {
-                        setCursorPosition(event.currentTarget.selectionStart)
-                        updateSelection(event.currentTarget)
+                      onLinkEdit={(kind, value) => editRenderedLink(kind, value)}
+                      onSelection={(start, end, label) => {
+                        setSelection(label ? { start, end, label } : null)
                       }}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Tab') {
-                          event.preventDefault()
-                          const target = event.currentTarget
-                          const start = target.selectionStart
-                          const end = target.selectionEnd
-                          const content = `${activeNote.content.slice(0, start)}  ${activeNote.content.slice(end)}`
-                          updateContent(content)
-                          window.setTimeout(() => target.setSelectionRange(start + 2, start + 2), 0)
-                        }
-                      }}
-                      placeholder={'Start writing…\n\nType a page name followed by ;;\nType a label followed by :: to add a URL.\nMarkdown is supported.'}
-                      spellCheck
                     />
                     {selection && (
                       <div className="selection-toolbox" role="toolbar" aria-label="Add link">
@@ -877,6 +1178,16 @@ export function WorkspaceApp({
                     {currentWikiQuery !== null && (
                       <div className="wiki-suggestions">
                         <span>Link to a note</span>
+                        <label className="wiki-search">
+                          <Search size={14} />
+                          <input
+                            autoFocus
+                            value={pageSearch}
+                            onChange={(event) => setPageSearch(event.target.value)}
+                            placeholder="Search pages…"
+                            aria-label="Search pages to link"
+                          />
+                        </label>
                         {suggestions.map((note) => (
                           <button key={note.id} onClick={() => insertWikiLink(note)}>
                             <FileText size={14} />
@@ -884,11 +1195,11 @@ export function WorkspaceApp({
                           </button>
                         ))}
                         {!suggestions.some((note) =>
-                          note.title.toLocaleLowerCase() === currentWikiQuery.toLocaleLowerCase()
-                        ) && currentWikiLabel && (
+                          note.title.toLocaleLowerCase() === effectiveWikiQuery
+                        ) && pageSearch.trim() && (
                           <button type="button" onClick={createWikiLink}>
                             <Plus size={14} />
-                            Create “{currentWikiLabel}”
+                            Create “{pageSearch.trim()}”
                           </button>
                         )}
                       </div>
@@ -896,8 +1207,27 @@ export function WorkspaceApp({
                   </>
                 ) : (
                   <div className="markdown-preview">
+                    {editingLabel && (
+                      <form className="inline-link-editor" onSubmit={saveRenderedLabel}>
+                        <span>Edit label</span>
+                        <input
+                          autoFocus
+                          value={editingLabel.label}
+                          onChange={(event) => setEditingLabel((current) =>
+                            current ? { ...current, label: event.target.value } : current
+                          )}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Escape') setEditingLabel(null)
+                          }}
+                          aria-label="Link label"
+                        />
+                        <button type="submit">Save</button>
+                        <button type="button" onClick={() => setEditingLabel(null)}>Cancel</button>
+                      </form>
+                    )}
                     <ReactMarkdown
                       remarkPlugins={[remarkGfm]}
+                      rehypePlugins={[rehypeRaw, [rehypeSanitize, markdownSanitizeSchema]]}
                       components={{
                         a: ({ href, children, ...props }) => {
                           if (href?.startsWith('#note=')) {
@@ -908,13 +1238,9 @@ export function WorkspaceApp({
                               onPointerDown={(event) => onLinkPointerDown(event, 'page', `${label}\u0000${target}`)}
                               onPointerUp={onLinkPointerUp}
                               onPointerLeave={onLinkPointerUp}
-                              onClick={(event) => {
-                                if (event.currentTarget.dataset.longPressed === 'true') {
-                                  event.currentTarget.dataset.longPressed = 'false'
-                                  return
-                                }
-                                navigateWikiLink(target)
-                              }}
+                              onClick={(event) => handleRenderedLinkClick(event, 'page', `${label}\u0000${target}`)}
+                              onDoubleClick={(event) => handleRenderedLinkDoubleClick(event, 'page', target)}
+                              onContextMenu={(event) => handleRenderedLinkContextMenu(event, 'page', `${label}\u0000${target}`)}
                             >
                               {children}
                             </button>
@@ -927,12 +1253,9 @@ export function WorkspaceApp({
                             onPointerDown={(event) => onLinkPointerDown(event, 'url', `${label}\u0000${href ?? ''}`)}
                             onPointerUp={onLinkPointerUp}
                             onPointerLeave={onLinkPointerUp}
-                            onClick={(event) => {
-                              if (event.currentTarget.dataset.longPressed === 'true') {
-                                event.preventDefault()
-                                event.currentTarget.dataset.longPressed = 'false'
-                              }
-                            }}
+                            onClick={(event) => handleRenderedLinkClick(event, 'url', `${label}\u0000${href ?? ''}`)}
+                            onDoubleClick={(event) => handleRenderedLinkDoubleClick(event, 'url', href ?? '')}
+                            onContextMenu={(event) => handleRenderedLinkContextMenu(event, 'url', `${label}\u0000${href ?? ''}`)}
                             {...props}
                           >{children}</a>
                         },
@@ -1057,6 +1380,17 @@ function notePreview(content: string) {
   return content.replace(/[#*`>[\]]/g, '').replace(/\s+/g, ' ').trim() || 'No content yet'
 }
 
+type EditorFormat =
+  | 'bold'
+  | 'italic'
+  | 'underline'
+  | 'strike'
+  | 'heading'
+  | 'bullet'
+  | 'number'
+  | 'quote'
+  | 'code'
+
 function relativeDate(value: string) {
   const delta = Date.now() - new Date(value).getTime()
   if (delta < 60_000) return 'just now'
@@ -1080,6 +1414,112 @@ function wikiQuery(content: string, cursor: number): string | null {
 function wikiLinkLabel(content: string, cursor: number): string {
   const trailing = content.slice(0, cursor).match(/"([^"\n]+)";;$|([^\s;\n]+);;$/)
   return trailing ? (trailing[1] ?? trailing[2]) : ''
+}
+
+function editableHtmlToMarkdown(root: HTMLElement): string {
+  const blockTags = new Set(['DIV', 'P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'BLOCKQUOTE', 'PRE', 'LI'])
+  const serialize = (node: Node): string => {
+    if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? ''
+    if (!(node instanceof HTMLElement)) return ''
+    const children = [...node.childNodes].map(serialize).join('')
+    switch (node.tagName) {
+      case 'BR':
+        return '\n'
+      case 'A': {
+        if (!children) return ''
+        const kind = node.dataset.linkKind
+        const destination = node.dataset.linkDestination ?? node.getAttribute('href') ?? ''
+        return kind === 'page'
+          ? toPageSyntax(children, destination)
+          : toUrlSyntax(children, destination)
+      }
+      case 'STRONG':
+      case 'B':
+        return `**${children}**`
+      case 'EM':
+      case 'I':
+        return `*${children}*`
+      case 'U':
+        return `<u>${children}</u>`
+      case 'S':
+      case 'DEL':
+        return `~~${children}~~`
+      case 'CODE':
+        return node.parentElement?.tagName === 'PRE' ? children : `\`${children}\``
+      case 'PRE':
+        return `\`\`\`\n${children}\n\`\`\`\n`
+      case 'P':
+        return `${children}\n\n`
+      case 'H1':
+        return `# ${children}\n\n`
+      case 'H2':
+        return `## ${children}\n\n`
+      case 'H3':
+        return `### ${children}\n\n`
+      case 'H4':
+        return `#### ${children}\n\n`
+      case 'H5':
+        return `##### ${children}\n\n`
+      case 'H6':
+        return `###### ${children}\n\n`
+      case 'BLOCKQUOTE':
+        return `${children.split('\n').map((line) => `> ${line}`).join('\n')}\n`
+      case 'UL':
+        return `${[...node.children].map((child) => `- ${serialize(child)}`).join('\n')}\n`
+      case 'OL':
+        return `${[...node.children].map((child, index) => `${index + 1}. ${serialize(child)}`).join('\n')}\n`
+      case 'LI':
+        return children.replace(/\n+$/, '')
+      default:
+        return blockTags.has(node.tagName) ? `${children}\n` : children
+    }
+  }
+  return [...root.childNodes].map(serialize).join('').replace(/\n{3,}/g, '\n\n').replace(/\n+$/, '')
+}
+
+function getTextBeforeCaret(root: HTMLElement): string {
+  const selection = window.getSelection()
+  if (!selection?.rangeCount || !selection.anchorNode || !root.contains(selection.anchorNode)) return ''
+  const range = selection.getRangeAt(0).cloneRange()
+  range.selectNodeContents(root)
+  range.setEnd(selection.anchorNode, selection.anchorOffset)
+  return range.toString()
+}
+
+function getCaretTextOffset(root: HTMLElement): number {
+  return getTextBeforeCaret(root).length
+}
+
+function placeCaretAtTextOffset(root: HTMLDivElement | null, offset: number) {
+  if (!root) return
+  root.focus()
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  let remaining = Math.max(0, offset)
+  let current = walker.nextNode()
+  let target: Node | null = current
+  let targetOffset = 0
+  while (current) {
+    const length = current.textContent?.length ?? 0
+    if (remaining <= length) {
+      target = current
+      targetOffset = remaining
+      break
+    }
+    remaining -= length
+    current = walker.nextNode()
+    target = current
+  }
+  const range = document.createRange()
+  if (target?.nodeType === Node.TEXT_NODE) {
+    range.setStart(target, Math.min(targetOffset, target.textContent?.length ?? 0))
+  } else {
+    range.selectNodeContents(root)
+    range.collapse(false)
+  }
+  range.collapse(true)
+  const selection = window.getSelection()
+  selection?.removeAllRanges()
+  selection?.addRange(range)
 }
 
 function normalizeUrl(value: string): string {

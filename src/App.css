@@ -1223,6 +1223,26 @@ kbd {
   font-size: 10px;
 }
 
+.linked-note-back {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  gap: 5px;
+  margin-right: 4px;
+  padding: 0 9px;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line));
+  border-radius: 7px;
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.linked-note-back:hover {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--line));
+  color: var(--accent);
+}
+
 .segmented-control {
   display: flex;
   padding: 3px;
@@ -1342,11 +1362,46 @@ kbd {
   position: relative;
 }
 
+.editor-toolbar {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 3px;
+  margin-bottom: 8px;
+  padding: 4px 6px;
+  border: 1px solid color-mix(in srgb, var(--line) 65%, transparent);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.editor-toolbar button {
+  display: grid;
+  width: 30px;
+  height: 28px;
+  place-items: center;
+  border-radius: 5px;
+  color: var(--muted);
+  background: transparent;
+}
+
+.editor-toolbar button:hover {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.editor-toolbar > span {
+  width: 1px;
+  height: 18px;
+  margin: 0 3px;
+  background: var(--line);
+}
+
 .note-editor {
   display: block;
+  box-sizing: border-box;
   width: 100%;
   min-height: 430px;
-  resize: vertical;
+  overflow-wrap: anywhere;
   padding: 15px 16px;
   border: 1px solid color-mix(in srgb, var(--line) 62%, transparent);
   border-radius: 8px;
@@ -1357,6 +1412,35 @@ kbd {
   font-size: 15px;
   line-height: 1.9;
   tab-size: 2;
+}
+
+.note-editor:empty::before {
+  color: var(--faint);
+  content: 'Start writing… Type a page name followed by ;; or a label followed by :: to add a URL.';
+  pointer-events: none;
+}
+
+.note-editor > :first-child {
+  margin-top: 0;
+}
+
+.note-editor > :last-child {
+  margin-bottom: 0;
+}
+
+.note-editor a {
+  color: var(--accent);
+  cursor: text;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--accent) 58%, transparent);
+  text-underline-offset: 3px;
+}
+
+.note-editor .wiki-link {
+  display: inline;
+  padding: 1px 3px;
+  border-radius: 4px;
+  background: var(--accent-soft);
 }
 
 .note-editor:focus {
@@ -1388,6 +1472,37 @@ kbd {
   font-weight: 700;
   letter-spacing: 0.09em;
   text-transform: uppercase;
+}
+
+.wiki-search {
+  display: flex;
+  min-height: 35px;
+  align-items: center;
+  gap: 7px;
+  margin: 0 3px 5px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--muted);
+  background: var(--page);
+}
+
+.wiki-search:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--line));
+}
+
+.wiki-search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  color: var(--ink);
+  background: transparent;
+  font-size: 11px;
+}
+
+.wiki-search input::placeholder {
+  color: var(--faint);
 }
 
 .wiki-suggestions button {
@@ -1444,6 +1559,52 @@ kbd {
   color: var(--ink);
   font-size: 15px;
   line-height: 1.85;
+}
+
+.inline-link-editor {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 16px;
+  padding: 8px 9px;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line));
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.inline-link-editor span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.inline-link-editor input {
+  min-width: 0;
+  flex: 1;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  background: var(--page);
+  outline: 0;
+}
+
+.inline-link-editor input:focus {
+  border-color: var(--accent);
+}
+
+.inline-link-editor button {
+  padding: 6px 9px;
+  border-radius: 6px;
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.inline-link-editor button:last-child {
+  color: var(--muted);
+  background: transparent;
 }
 
 .markdown-preview > :first-child {

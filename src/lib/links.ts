@@ -102,6 +102,116 @@ export function renameWikiLinks(content: string, oldTitle: string, newTitle: str
   )
 }
 
+export function renderedLinkLabelRange(
+  content: string,
+  kind: 'page' | 'url',
+  label: string,
+  destination: string,
+): { labelStart: number; labelEnd: number } | null {
+  const candidates = kind === 'url'
+    ? [toUrlSyntax(label, destination), `::${label}::(${destination})`]
+    : [
+        toPageSyntax(label, destination),
+        toPageSyntax(destination),
+        `;;${label}|${destination};;`,
+        `;;${destination};;`,
+        `[[${destination}|${label}]]`,
+        `[[${destination}]]`,
+      ]
+  for (const candidate of candidates) {
+    const tokenStart = content.indexOf(candidate)
+    if (tokenStart < 0) continue
+    const labelOffset = candidate.indexOf(label)
+    if (labelOffset < 0) continue
+    return {
+      labelStart: tokenStart + labelOffset,
+      labelEnd: tokenStart + labelOffset + label.length,
+    }
+  }
+  return null
+}
+
+export function replaceRenderedLinkLabel(
+  content: string,
+  kind: 'page' | 'url',
+  label: string,
+  destination: string,
+  nextLabel: string,
+): string {
+  const candidates = kind === 'url'
+    ? [toUrlSyntax(label, destination), `::${label}::(${destination})`]
+    : [
+        toPageSyntax(label, destination),
+        toPageSyntax(destination),
+        `;;${label}|${destination};;`,
+        `;;${destination};;`,
+        `[[${destination}|${label}]]`,
+        `[[${destination}]]`,
+      ]
+  for (const candidate of candidates) {
+    const start = content.indexOf(candidate)
+    if (start < 0) continue
+    if (!nextLabel.trim()) return content.slice(0, start) + content.slice(start + candidate.length)
+    const replacement = kind === 'url'
+      ? toUrlSyntax(nextLabel, destination)
+      : toPageSyntax(nextLabel, destination)
+    return content.slice(0, start) + replacement + content.slice(start + candidate.length)
+  }
+  return content
+}
+
+export function renderedLinkSourceRange(
+  content: string,
+  kind: 'page' | 'url',
+  label: string,
+  destination: string,
+): { start: number; end: number } | null {
+  const candidates = kind === 'url'
+    ? [toUrlSyntax(label, destination), `::${label}::(${destination})`]
+    : [
+        toPageSyntax(label, destination),
+        toPageSyntax(destination),
+        `;;${label}|${destination};;`,
+        `;;${destination};;`,
+        `[[${destination}|${label}]]`,
+        `[[${destination}]]`,
+      ]
+  for (const candidate of candidates) {
+    const start = content.indexOf(candidate)
+    if (start >= 0) return { start, end: start + candidate.length }
+  }
+  return null
+}
+
+export function selectedLinkRange(
+  content: string,
+  selectionStart: number,
+  selectionEnd: number,
+): { start: number; end: number } | null {
+  const labelPatterns = [
+    /"([^"\n]+)"::\([^)]+\)/g,
+    /([^\s:\n]+)::\([^)]+\)/g,
+    /::([^:\n]+)::\([^)]+\)/g,
+    /"([^"\n]+)";;\([^)]+\)/g,
+    /"([^"\n]+)";;/g,
+    /([^\s;\n]+);;\([^)]+\)/g,
+    /([^\s;\n]+);;/g,
+    /;;([^;|\n]+)(?:\|[^;\n]+)?;;/g,
+    /\[\[([^\]|\n]+)(?:\|([^\]]+))?\]\]/g,
+  ]
+  for (const pattern of labelPatterns) {
+    for (const match of content.matchAll(pattern)) {
+      const rawLabel = match[2] ?? match[1]
+      const labelStart = (match.index ?? 0) + match[0].indexOf(rawLabel)
+      const labelEnd = labelStart + rawLabel.length
+      if (selectionStart === labelStart && selectionEnd === labelEnd) {
+        return { start: match.index ?? 0, end: (match.index ?? 0) + match[0].length }
+      }
+    }
+  }
+  return null
+}
+
 function escapeLabel(label: string): string {
   return label.replaceAll('\\', '\\\\').replaceAll('[', '\\[').replaceAll(']', '\\]')
 }

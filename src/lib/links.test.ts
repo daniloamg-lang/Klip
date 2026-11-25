@@ -5,7 +5,11 @@ import {
   linksFromContent,
   markdownWithWikiLinks,
   outgoingNotes,
+  renderedLinkSourceRange,
+  replaceRenderedLinkLabel,
+  renderedLinkLabelRange,
   renameWikiLinks,
+  selectedLinkRange,
 } from './links'
 
 function note(id: string, title: string, content = ''): Note {
@@ -67,5 +71,53 @@ describe('wiki links', () => {
     expect(markdownWithWikiLinks('Open ;;Beta;; and ::Wikipedia::(https://wikipedia.org).')).toBe(
       'Open [Beta](#note=Beta) and [Wikipedia](https://wikipedia.org).',
     )
+  })
+
+  it('locates the editable label inside a rendered smart link', () => {
+    const content = 'Read Wikipedia::(https://wikipedia.org).'
+    expect(renderedLinkLabelRange(content, 'url', 'Wikipedia', 'https://wikipedia.org')).toEqual({
+      labelStart: 5,
+      labelEnd: 14,
+    })
+  })
+
+  it('deletes the whole link when its selected label is removed', () => {
+    const token = 'Wikipedia::(https://wikipedia.org)'
+    const content = `Read ${token}.`
+    const start = content.indexOf('Wikipedia')
+    expect(selectedLinkRange(content, start, start + 'Wikipedia'.length)).toEqual({
+      start: 5,
+      end: 5 + token.length,
+    })
+  })
+
+  it('edits a rendered label without exposing or changing its URL', () => {
+    expect(replaceRenderedLinkLabel(
+      'Read Wikipedia::(https://wikipedia.org).',
+      'url',
+      'Wikipedia',
+      'https://wikipedia.org',
+      'Encyclopedia',
+    )).toBe('Read Encyclopedia::(https://wikipedia.org).')
+  })
+
+  it('removes a smart link when its label is cleared', () => {
+    expect(replaceRenderedLinkLabel(
+      'Read Wikipedia::(https://wikipedia.org).',
+      'url',
+      'Wikipedia',
+      'https://wikipedia.org',
+      '',
+    )).toBe('Read .')
+  })
+
+  it('finds the end of stored link syntax for continued writing', () => {
+    const token = 'Wikipedia::(https://wikipedia.org)'
+    expect(renderedLinkSourceRange(
+      `Read ${token}.`,
+      'url',
+      'Wikipedia',
+      'https://wikipedia.org',
+    )).toEqual({ start: 5, end: 5 + token.length })
   })
 })
